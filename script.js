@@ -21,7 +21,8 @@ const data = [
     ]}
 ];
 
-function createRow(item, levelClass, parentId = "") {
+// create a row for grid
+function createRow(item, parentId = "") {
     const tr = document.createElement("tr");
     tr.className = `level-${item.level}`;
     tr.dataset.level = item.level;
@@ -30,13 +31,20 @@ function createRow(item, levelClass, parentId = "") {
 
     const tdLevel = document.createElement("td");
     const icon = document.createElement("span");
-    icon.className = "expand-icon";
-    if (item.children) {
+
+    if (item.children && item.children.length > 0) {
+        icon.className = "expand-icon collapsed";
         icon.textContent = "+";
-        icon.onclick = () => toggleChildren(item.id);
+        icon.onclick = (e) => {
+            e.stopPropagation();
+            toggleChildren(item.id, icon);
+        };
+    } else {
+        icon.className = "no-icon";
     }
+
     tdLevel.appendChild(icon);
-    tdLevel.appendChild(document.createTextNode("Level " + item.level));
+    tdLevel.appendChild(document.createTextNode(" Level " + item.level));
 
     const tdId = document.createElement("td");
     tdId.textContent = item.id;
@@ -51,30 +59,49 @@ function createRow(item, levelClass, parentId = "") {
     return tr;
 }
 
-function toggleChildren(parentId) {
+// expand/collapse
+function toggleChildren(parentId, icon) {
     const rows = document.querySelectorAll(`[data-parent='${parentId}']`);
-    rows.forEach(row => {
-        const isHidden = row.style.display === "none";
-        row.style.display = isHidden ? "" : "none";
+    const isCollapsed = icon.classList.contains("collapsed");
 
-        if (!isHidden && parseInt(row.dataset.level) < 3) {
-            toggleChildren(row.dataset.id);
+    rows.forEach(row => {
+        row.style.display = isCollapsed ? "" : "none";
+
+        // If collapsing, also collapse children inside
+        if (!isCollapsed) {
+            const childIcon = row.querySelector(".expand-icon");
+            if (childIcon && childIcon.classList.contains("expanded")) {
+                childIcon.classList.remove("expanded");
+                childIcon.classList.add("collapsed");
+                childIcon.textContent = "+";
+            }
+            toggleChildren(row.dataset.id, { classList: { contains: () => false } });
         }
     });
+
+    if (isCollapsed) {
+        icon.classList.remove("collapsed");
+        icon.classList.add("expanded");
+        icon.textContent = "-";
+    } else {
+        icon.classList.remove("expanded");
+        icon.classList.add("collapsed");
+        icon.textContent = "+";
+    }
 }
 
-
+// render the full hierarchy
 function renderGrid() {
     const tbody = document.getElementById("grid-body");
     data.forEach(level1 => {
-        const row1 = createRow(level1, "level-1");
+        const row1 = createRow(level1);
         tbody.appendChild(row1);
         level1.children?.forEach(level2 => {
-            const row2 = createRow(level2, "level-2", level1.id);
+            const row2 = createRow(level2, level1.id);
             row2.style.display = "none";
             tbody.appendChild(row2);
             level2.children?.forEach(level3 => {
-                const row3 = createRow(level3, "level-3", level2.id);
+                const row3 = createRow(level3, level2.id);
                 row3.style.display = "none";
                 tbody.appendChild(row3);
             });
