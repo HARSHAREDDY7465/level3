@@ -59,26 +59,33 @@ function createRow(item, parentId = "") {
     return tr;
 }
 
-// expand/collapse
+// expand/collapse children
 function toggleChildren(parentId, icon) {
     const rows = document.querySelectorAll(`[data-parent='${parentId}']`);
     const isCollapsed = icon.classList.contains("collapsed");
 
     rows.forEach(row => {
-        row.style.display = isCollapsed ? "" : "none";
+        if (isCollapsed) {
+            // expand → show only direct children
+            row.style.display = "";
+        } else {
+            // collapse → hide children recursively
+            row.style.display = "none";
 
-        // If collapsing, also collapse children inside
-        if (!isCollapsed) {
-            const childIcon = row.querySelector(".expand-icon");
-            if (childIcon && childIcon.classList.contains("expanded")) {
+            // also reset any expanded child icons
+            const childIcon = row.querySelector(".expand-icon.expanded");
+            if (childIcon) {
                 childIcon.classList.remove("expanded");
                 childIcon.classList.add("collapsed");
                 childIcon.textContent = "+";
             }
-            toggleChildren(row.dataset.id, { classList: { contains: () => false } });
+
+            // recursive collapse
+            toggleChildren(row.dataset.id, { classList: { contains: () => true } });
         }
     });
 
+    // update current icon
     if (isCollapsed) {
         icon.classList.remove("collapsed");
         icon.classList.add("expanded");
