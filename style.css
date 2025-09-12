@@ -20,6 +20,7 @@ body {
 .crm-subgrid td {
     border: 1px solid #d0d0d0;
     padding: 8px;
+    vertical-align: middle;
 }
 
 .crm-subgrid tr:nth-child(even) {
@@ -31,19 +32,27 @@ body {
     cursor: pointer;
 }
 
-.level-1 {
+.level-1 td {
     font-weight: bold;
 }
 
-.level-2 {
+.level-2 td {
     padding-left: 20px;
 }
 
-.level-3 {
+.level-3 td {
     padding-left: 40px;
 }
 
 .expand-icon {
     cursor: pointer;
+    margin-right: 5px;
+    font-weight: bold;
+    color: #0078d4;
+}
+
+.no-icon {
+    display: inline-block;
+    width: 12px;
     margin-right: 5px;
 }
