@@ -1,15 +1,15 @@
 async function getContinents() {
-    let result = await Xrm.WebApi.retrieveMultipleRecords("new_continent", "?$select=new_name,new_continentid");
+    let result = await Xrm.WebApi.retrieveMultipleRecords("mash_continent", "?$select=mash_name,mash_continentsid");
     return result.entities;
 }
 
 async function getCountries(continentId) {
-    let result = await Xrm.WebApi.retrieveMultipleRecords("new_country", `?$select=new_name,new_countryid&$filter=_new_continent_value eq ${continentId}`);
+    let result = await Xrm.WebApi.retrieveMultipleRecords("mash_country", `?$select=mash_name,mash_countrysid&$filter=_mash_continent_value eq ${continentId}`);
     return result.entities;
 }
 
 async function getStates(countryId) {
-    let result = await Xrm.WebApi.retrieveMultipleRecords("new_state", `?$select=new_name,new_stateid&$filter=_new_country_value eq ${countryId}`);
+    let result = await Xrm.WebApi.retrieveMultipleRecords("mash_state", `?$select=mash_name,mash_statesid&$filter=_mash_country_value eq ${countryId}`);
     return result.entities;
 }
 
