@@ -21,7 +21,6 @@ const data = [
     ]}
 ];
 
-// create a row for grid
 function createRow(item, parentId = "") {
     const tr = document.createElement("tr");
     tr.className = `level-${item.level}`;
@@ -59,45 +58,43 @@ function createRow(item, parentId = "") {
     return tr;
 }
 
-// expand/collapse children
 function toggleChildren(parentId, icon) {
     const rows = document.querySelectorAll(`[data-parent='${parentId}']`);
     const isCollapsed = icon.classList.contains("collapsed");
 
-    rows.forEach(row => {
-        if (isCollapsed) {
-            // expand → show only direct children
-            row.style.display = "";
-        } else {
-            // collapse → hide children recursively
-            row.style.display = "none";
-
-            // also reset any expanded child icons
-            const childIcon = row.querySelector(".expand-icon.expanded");
-            if (childIcon) {
-                childIcon.classList.remove("expanded");
-                childIcon.classList.add("collapsed");
-                childIcon.textContent = "+";
-            }
-
-            // recursive collapse
-            toggleChildren(row.dataset.id, { classList: { contains: () => true } });
-        }
-    });
-
-    // update current icon
     if (isCollapsed) {
+        // expand → show direct children
+        rows.forEach(row => row.style.display = "");
         icon.classList.remove("collapsed");
         icon.classList.add("expanded");
         icon.textContent = "-";
     } else {
+        // collapse → hide children recursively
+        collapseRecursively(parentId);
         icon.classList.remove("expanded");
         icon.classList.add("collapsed");
         icon.textContent = "+";
     }
 }
 
-// render the full hierarchy
+function collapseRecursively(parentId) {
+    const children = document.querySelectorAll(`[data-parent='${parentId}']`);
+    children.forEach(row => {
+        row.style.display = "none";
+
+        // reset the expand icon to "+"
+        const childIcon = row.querySelector(".expand-icon");
+        if (childIcon && childIcon.classList.contains("expanded")) {
+            childIcon.classList.remove("expanded");
+            childIcon.classList.add("collapsed");
+            childIcon.textContent = "+";
+        }
+
+        // collapse further down
+        collapseRecursively(row.dataset.id);
+    });
+}
+
 function renderGrid() {
     const tbody = document.getElementById("grid-body");
     data.forEach(level1 => {
