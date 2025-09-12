@@ -22,52 +22,93 @@ async function getStates(countryId) {
     return result.entities;
 }
 
-async function buildHierarchy() {
-    let container = document.getElementById("treeContainer");
-    container.innerHTML = "";
+function createRow(item, level, parentId = "", hasChildren = false) {
+    const tr = document.createElement("tr");
+    tr.className = `level-${level}`;
+    tr.dataset.level = level;
+    tr.dataset.id = item.id;
+    if (parentId) tr.dataset.parent = parentId;
+
+    const tdLevel = document.createElement("td");
+    const icon = document.createElement("span");
+    icon.className = "expand-icon";
+
+    if (hasChildren) {
+        icon.textContent = "+";
+        icon.onclick = () => toggleChildren(item.id, level + 1, tr, hasChildren);
+    }
+    tdLevel.appendChild(icon);
+    tdLevel.appendChild(document.createTextNode("Level " + level));
+
+    const tdId = document.createElement("td");
+    tdId.textContent = item.id;
+
+    const tdName = document.createElement("td");
+    tdName.textContent = item.name;
+
+    tr.appendChild(tdLevel);
+    tr.appendChild(tdId);
+    tr.appendChild(tdName);
+
+    return tr;
+}
+
+async function toggleChildren(parentId, level, parentRow, hasChildren) {
+    const tbody = document.getElementById("grid-body");
+    const expandIcon = parentRow.querySelector(".expand-icon");
+
+    // check if already expanded
+    if (expandIcon.textContent === "+") {
+        expandIcon.textContent = "-";
+
+        if (level === 2) {
+            let countries = await getCountries(parentId);
+            countries.forEach(country => {
+                const row = createRow(
+                    { id: country.mash_countrysid, name: country.mash_name },
+                    2,
+                    parentId,
+                    true
+                );
+                row.style.display = "";
+                tbody.insertBefore(row, parentRow.nextSibling);
+            });
+        } else if (level === 3) {
+            let states = await getStates(parentId);
+            states.forEach(state => {
+                const row = createRow(
+                    { id: state.mash_statesid, name: state.mash_name },
+                    3,
+                    parentId,
+                    false
+                );
+                row.style.display = "";
+                tbody.insertBefore(row, parentRow.nextSibling);
+            });
+        }
+    } else {
+        // collapse
+        expandIcon.textContent = "+";
+        const rows = document.querySelectorAll(`[data-parent='${parentId}']`);
+        rows.forEach(r => r.remove());
+    }
+}
+
+async function renderGrid() {
+    const tbody = document.getElementById("grid-body");
+    tbody.innerHTML = "";
 
     let continents = await getContinents();
+
     continents.forEach(continent => {
-        // ✅ Correct field names
-        let continentNode = createNode(continent.mash_name, "continent");
-        container.appendChild(continentNode);
-
-        continentNode.querySelector(".expand").addEventListener("click", async () => {
-            if (!continentNode.classList.contains("expanded")) {
-                let countries = await getCountries(continent.mash_continentsid);
-                countries.forEach(country => {
-                    let countryNode = createNode(country.mash_name, "country");
-                    continentNode.appendChild(countryNode);
-
-                    countryNode.querySelector(".expand").addEventListener("click", async () => {
-                        if (!countryNode.classList.contains("expanded")) {
-                            let states = await getStates(country.mash_countrysid);
-                            states.forEach(state => {
-                                let stateNode = createNode(state.mash_name, "state");
-                                countryNode.appendChild(stateNode);
-                            });
-                            countryNode.classList.add("expanded");
-                        } else {
-                            collapseNode(countryNode);
-                        }
-                    });
-                });
-                continentNode.classList.add("expanded");
-            } else {
-                collapseNode(continentNode);
-            }
-        });
+        const row = createRow(
+            { id: continent.mash_continentsid, name: continent.mash_name },
+            1,
+            "",
+            true
+        );
+        tbody.appendChild(row);
     });
 }
 
-function createNode(name, type) {
-    let div = document.createElement("div");
-    div.className = "node " + type;
-    div.innerHTML = `<span class="expand">[+]</span> ${name}`;
-    return div;
-}
-
-function collapseNode(node) {
-    [...node.querySelectorAll(".node")].forEach(child => child.remove());
-    node.classList.remove("expanded");
-}
+renderGrid();
