@@ -105,22 +105,11 @@ async function patchData(entitySet, id, updateObj) {
 }
 
 // -------------------- LOOKUP SEARCH --------------------
-async function searchLookup(entitySet, query, top = 50, skip = 0) {
-  let filter = query ? `contains(tolower(name),'${query.toLowerCase()}')` : "";
-  let url = `${baseUrl}/api/data/v9.2/${entitySet}?$select=contactid,name&$top=${top}`;
-  if (filter) url += `&$filter=${encodeURIComponent(filter)}`;
-  if (skip) url += `&$skip=${skip}`;
-  const headers = {
-    "OData-MaxVersion": "4.0",
-    "OData-Version": "4.0",
-    "Content-Type": "application/json; charset=utf-8",
-    "Accept": "application/json",
-    "Prefer": "odata.include-annotations=*"
-  };
-  const res = await fetch(url, { method: "GET", headers });
-  if (!res.ok) throw new Error("API error: " + res.statusText);
-  const data = await res.json();
-  return data.value.map(item => ({ id: item.contactid, name: item.name }));
+async function searchLookup(entitySet, query) {
+  if (!query) query = "";
+  const filter = `contains(tolower(name),'${query.toLowerCase()}')`;
+  const data = await fetchData(entitySet, "contactid,name", filter);
+  return data.map(item => ({ id: item.contactid, name: item.name }));
 }
 
 // -------------------- OPTION SET --------------------
@@ -234,7 +223,8 @@ async function renderRow(tbody, level, record) {
 async function startEditCell(tr, record, field, td) {
   if (editingCell) return;
   editingCell = { tr, record, field };
-  td.classList.add("edit-cell"); td.innerHTML = "";
+  td.classList.add("edit-cell"); 
+  td.innerHTML = "";
 
   let input;
 
@@ -251,90 +241,87 @@ async function startEditCell(tr, record, field, td) {
     input.addEventListener("input", showDropdown);
     input.addEventListener("focus", showDropdown);
 
-  } else if (field.type === "choice") {
-    input = document.createElement("select");
-    const options = await fetchOptionSet(field.entityName || "opportunity", field.key);
-    options.forEach(opt => {
-      const o = document.createElement("option");
-      o.value = opt.value;
-      o.textContent = opt.label;
-      if (record[field.key] == opt.value) o.selected = true;
-      input.appendChild(o);
-    });
-  } else if (field.type === "boolean") {
-    input = document.createElement("select");
-    [["Yes", true], ["No", false]].forEach(([label, val]) => {
-      const o = document.createElement("option");
-      o.value = val;
-      o.textContent = label;
-      if (record[field.key] === val) o.selected = true;
-      input.appendChild(o);
-    });
   } else {
-    input = document.createElement("input");
-    input.type = field.type === "number" ? "number" : "text";
-    input.value = td.textContent || "";
+    if (field.type === "choice") {
+      input = document.createElement("select");
+      const options = await fetchOptionSet(field.entityName || "opportunity", field.key);
+      options.forEach(opt => {
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (record[field.key] == opt.value) o.selected = true;
+        input.appendChild(o);
+      });
+    } else if (field.type === "boolean") {
+      input = document.createElement("select");
+      [["Yes", true], ["No", false]].forEach(([label, val]) => {
+        const o = document.createElement("option");
+        o.value = val;
+        o.textContent = label;
+        if (record[field.key] === val) o.selected = true;
+        input.appendChild(o);
+      });
+    } else {
+      input = document.createElement("input");
+      input.type = field.type === "number" ? "number" : "text";
+      input.value = td.textContent || "";
+    }
   }
 
   input.onkeydown = ev => {
     if (ev.key === "Enter") saveEdit(record, field, input, td);
     if (ev.key === "Escape") cancelEdit(td);
   };
-  td.appendChild(input); 
+  td.appendChild(input);
   input.focus();
 }
 
 async function saveEdit(record, field, input, td) {
   let value; 
   const updateObj = {};
-  if(field.type === "lookup") {
-    value = input.dataset.id;
-    if(!value) return cancelEdit(td); // no selection
+  if(field.type==="lookup") { 
+    value = input.dataset.id || null;
+    if(!value) return;
     updateObj[`${field.key}@odata.bind`] = `/${field.lookupEntity}(${value})`;
   } else value = input.value; 
-  if(field.type !== "lookup") updateObj[field.key] = value;
+  if(field.type!=="lookup") updateObj[field.key] = value;
 
   await patchData(hierarchyConfig[0].entitySet, record[hierarchyConfig[0].key], updateObj);
   td.textContent = input.value; 
-  editingCell = null;
+  editingCell=null;
 }
 
-function cancelEdit(td) { td.textContent = td.textContent || ""; editingCell = null; }
+function cancelEdit(td){ td.textContent=td.textContent||""; editingCell=null; }
 
 // -------------------- LOOKUP DROPDOWN --------------------
-function showLookupDropdown(td, input, results) {
-  let dropdown = td.querySelector(".lookup-dropdown");
-  if (!dropdown) {
-    dropdown = document.createElement("div");
-    dropdown.className = "lookup-dropdown";
-    dropdown.style.position = "absolute";
-    dropdown.style.background = "#fff";
-    dropdown.style.border = "1px solid #ccc";
-    dropdown.style.zIndex = "1000";
-    dropdown.style.maxHeight = "200px";
-    dropdown.style.overflowY = "auto";
+function showLookupDropdown(td, input, results){
+  let dropdown=td.querySelector(".lookup-dropdown");
+  if(!dropdown){ 
+    dropdown=document.createElement("div"); 
+    dropdown.className="lookup-dropdown"; 
+    dropdown.style.position="absolute"; 
+    dropdown.style.background="#fff"; 
+    dropdown.style.border="1px solid #ccc"; 
+    dropdown.style.zIndex="1000"; 
+    dropdown.style.maxHeight="200px"; 
+    dropdown.style.overflowY="auto"; 
     td.appendChild(dropdown);
   }
-
-  dropdown.innerHTML = "";
-  results.forEach(r => {
-    const div = document.createElement("div");
-    div.textContent = r.name;
-    div.style.padding = "2px 5px";
-    div.style.cursor = "pointer";
-    div.onclick = () => {
-      input.value = r.name;
-      input.dataset.id = r.id;
-      dropdown.innerHTML = "";
-    };
+  dropdown.innerHTML="";
+  results.forEach(r=>{
+    const div=document.createElement("div");
+    div.textContent=r.name; 
+    div.style.padding="2px 5px"; 
+    div.style.cursor="pointer";
+    div.onclick=()=>{ input.value=r.name; input.dataset.id=r.id; dropdown.innerHTML=""; };
     dropdown.appendChild(div);
   });
 }
 
 // -------------------- ROW SELECT --------------------
-function handleRowSelect(level, id, multiple) {
-  if (!selectedRows[level]) selectedRows[level] = new Set();
-  if (multiple) selectedRows[level].has(id) ? selectedRows[level].delete(id) : selectedRows[level].add(id); 
-  else selectedRows[level] = new Set([id]);
+function handleRowSelect(level,id,multiple){
+  if(!selectedRows[level]) selectedRows[level]=new Set();
+  if(multiple){ selectedRows[level].has(id)?selectedRows[level].delete(id):selectedRows[level].add(id); } 
+  else selectedRows[level]=new Set([id]);
   renderGrid();
 }
