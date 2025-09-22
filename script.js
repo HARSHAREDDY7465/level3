@@ -289,5 +289,52 @@ async function saveEdit(record, field, input, td) {
   const updateObj = {};
   if(field.type === "lookup") {
     value = input.dataset.id;
-    if(!value) return cancelEdit(td
-                                 
+    if(!value) return cancelEdit(td); // no selection
+    updateObj[`${field.key}@odata.bind`] = `/${field.lookupEntity}(${value})`;
+  } else value = input.value; 
+  if(field.type !== "lookup") updateObj[field.key] = value;
+
+  await patchData(hierarchyConfig[0].entitySet, record[hierarchyConfig[0].key], updateObj);
+  td.textContent = input.value; 
+  editingCell = null;
+}
+
+function cancelEdit(td) { td.textContent = td.textContent || ""; editingCell = null; }
+
+// -------------------- LOOKUP DROPDOWN --------------------
+function showLookupDropdown(td, input, results) {
+  let dropdown = td.querySelector(".lookup-dropdown");
+  if (!dropdown) {
+    dropdown = document.createElement("div");
+    dropdown.className = "lookup-dropdown";
+    dropdown.style.position = "absolute";
+    dropdown.style.background = "#fff";
+    dropdown.style.border = "1px solid #ccc";
+    dropdown.style.zIndex = "1000";
+    dropdown.style.maxHeight = "200px";
+    dropdown.style.overflowY = "auto";
+    td.appendChild(dropdown);
+  }
+
+  dropdown.innerHTML = "";
+  results.forEach(r => {
+    const div = document.createElement("div");
+    div.textContent = r.name;
+    div.style.padding = "2px 5px";
+    div.style.cursor = "pointer";
+    div.onclick = () => {
+      input.value = r.name;
+      input.dataset.id = r.id;
+      dropdown.innerHTML = "";
+    };
+    dropdown.appendChild(div);
+  });
+}
+
+// -------------------- ROW SELECT --------------------
+function handleRowSelect(level, id, multiple) {
+  if (!selectedRows[level]) selectedRows[level] = new Set();
+  if (multiple) selectedRows[level].has(id) ? selectedRows[level].delete(id) : selectedRows[level].add(id); 
+  else selectedRows[level] = new Set([id]);
+  renderGrid();
+}
