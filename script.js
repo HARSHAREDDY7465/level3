@@ -1,44 +1,29 @@
-// -- Replace with your Dataverse org URL --
-const baseUrl = "https://orgbc876bfc.crm8.dynamics.com"; //-------- This is Development URL ------------
+// -------------------- CONFIG --------------------
+const baseUrl = "https://orgbc876bfc.crm8.dynamics.com"; // Your org URL
 
-const opportunityColumns = [
-  { key: "name", label: "Opportunity Name", editable: true, required: true },
-  { key: "_parentcontactid_value", label: "Customer", editable: false },
-  { key: "estimatedvalue", label: "Revenue", editable: true, type: "number" },
-  { key: "niq_ishostopportunity", label: "Is Host?", editable: false }
-];
-const quoteColumns = [
-  { key: "name", label: "Quote Name", editable: true, required: true },
-  { key: "statecode", label: "Status", editable: true,required: false }
-];
-const quoteLineColumns = [
-  { key: "productname", label: "Product", editable: true, required: true },
-  { key: "quantity", label: "Quantity", editable: true, type: "number", required: true },
-  { key: "extendedamount", label: "Total Amount", editable: false, type: "number", required: true }
-];
-const quoteCharacteristicColumns = [
-  { key: "niq_name", label: "Feature", editable: true, required: true },
-  { key: "niq_type", label: "Type", editable: true, required: true, type: "choice" },
-  { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" }
-];
-
-// ----------- HIERARCHY CONFIG WITH FILTER FUNCTION AND MULTIPLE SELECTION -----------
 const hierarchyConfig = [
   {
     entitySet: "opportunities",
     key: "opportunityid",
-    columns: opportunityColumns,
+    columns: [
+      { key: "name", label: "Opportunity Name", editable: true, required: true },
+      { key: "_parentcontactid_value", label: "Customer", editable: true, type: "lookup", lookupEntity: "contacts" },
+      { key: "estimatedvalue", label: "Revenue", editable: true, type: "number" },
+      { key: "niq_ishostopportunity", label: "Is Host?", editable: false, type: "boolean" }
+    ],
     child: 1,
     title: "Child Opportunities",
     multiple: true,
-    filter: ({ currentRecordId }) =>
-      `niq_ishostopportunity eq false and _niq_originalopportunity_value eq ${formatGuid(currentRecordId)}`
+    filter: ({ currentRecordId }) => `niq_ishostopportunity eq false and _niq_originalopportunity_value eq '${currentRecordId}'`
   },
   {
     entitySet: "quotes",
     key: "quoteid",
     parentField: "_opportunityid_value",
-    columns: quoteColumns,
+    columns: [
+      { key: "name", label: "Quote Name", editable: true, required: true },
+      { key: "statecode", label: "Status", editable: true, type: "choice" }
+    ],
     child: 2,
     title: "Quotes",
     multiple: true
@@ -47,7 +32,11 @@ const hierarchyConfig = [
     entitySet: "quotedetails",
     key: "quotedetailid",
     parentField: "_quoteid_value",
-    columns: quoteLineColumns,
+    columns: [
+      { key: "productname", label: "Product", editable: true, required: true },
+      { key: "quantity", label: "Quantity", editable: true, type: "number", required: true },
+      { key: "extendedamount", label: "Total Amount", editable: false, type: "number", required: true }
+    ],
     child: 3,
     title: "Quote Lines",
     multiple: true
@@ -56,13 +45,31 @@ const hierarchyConfig = [
     entitySet: "niq_productcharacteristics",
     key: "niq_productcharacteristicid",
     parentField: "_niq_quotedetail_value",
-    columns: quoteCharacteristicColumns,
+    columns: [
+      { key: "niq_name", label: "Feature", editable: true, required: true },
+      { key: "niq_type", label: "Type", editable: true, required: true, type: "choice" },
+      { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" }
+    ],
     title: "Quote Characteristics",
     multiple: true
   }
 ];
 
-// --- Dataverse fetch helper (no static data) ---
+// -------------------- GLOBAL STATE --------------------
+let currentRecordId = null;
+let expandedRows = {};
+let editingCell = null;
+let currentRows = [];
+let currentFilter = "";
+let selectedRows = {};
+
+// -------------------- UTILITY --------------------
+function formatGuid(id) {
+  if (typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id)) return `'${id}'`;
+  return id;
+}
+
+// -------------------- FETCH HELPERS --------------------
 async function fetchData(entitySet, selectFields, filter = "") {
   let url = `${baseUrl}/api/data/v9.2/${entitySet}?$select=${selectFields}`;
   if (filter) url += `&$filter=${encodeURIComponent(filter)}`;
@@ -74,7 +81,7 @@ async function fetchData(entitySet, selectFields, filter = "") {
     "Prefer": "odata.include-annotations=*"
   };
   const response = await fetch(url, { method: "GET", headers });
-  if (!response.ok) throw new Error("API error: " + response.statusText + " (" + response.status + ")");
+  if (!response.ok) throw new Error("API error: " + response.statusText);
   const data = await response.json();
   return data.value || [];
 }
@@ -95,25 +102,44 @@ async function patchData(entitySet, id, updateObj) {
     body: JSON.stringify(updateObj)
   });
   if (!response.ok) throw new Error("Save failed: " + response.statusText);
-  return;
 }
 
-function formatGuid(id) {
-  if (typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id)) return `'${id}'`;
-  return id;
+// -------------------- LOOKUP SEARCH --------------------
+async function searchLookup(entitySet, query, top = 50, skip = 0) {
+  let filter = query ? `contains(tolower(name),'${query.toLowerCase()}')` : "";
+  let url = `${baseUrl}/api/data/v9.2/${entitySet}?$select=contactid,name&$top=${top}`;
+  if (filter) url += `&$filter=${encodeURIComponent(filter)}`;
+  if (skip) url += `&$skip=${skip}`;
+
+  const headers = {
+    "OData-MaxVersion": "4.0",
+    "OData-Version": "4.0",
+    "Content-Type": "application/json; charset=utf-8",
+    "Accept": "application/json",
+    "Prefer": "odata.include-annotations=*"
+  };
+  const res = await fetch(url, { method: "GET", headers });
+  if (!res.ok) throw new Error("API error: " + res.statusText);
+  const data = await res.json();
+  return data.value.map(item => ({ id: item.contactid, name: item.name }));
 }
 
-// --- State ---
-let currentRecordId = null;
-let expandedRows = {};
-let editingCell = null;
-let currentRows = [];
-let currentFilter = "";
-let selectedRows = {};
-
-function rowId(level, id) {
-  return `${level}-${id}`;
+// -------------------- OPTION SET --------------------
+const optionSetCache = {};
+async function fetchOptionSet(entityName, fieldName) {
+  const key = `${entityName}_${fieldName}`;
+  if (optionSetCache[key]) return optionSetCache[key];
+  const url = `${baseUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${fieldName}')?$expand=OptionSet`;
+  const headers = { "Accept": "application/json" };
+  const res = await fetch(url, { headers });
+  const data = await res.json();
+  const options = data.OptionSet.Options.map(opt => ({ value: opt.Value, label: opt.Label.UserLocalizedLabel.Label }));
+  optionSetCache[key] = options;
+  return options;
 }
+
+// -------------------- GRID RENDER --------------------
+function rowId(level, id) { return `${level}-${id}`; }
 
 document.addEventListener("DOMContentLoaded", () => {
   try {
@@ -122,375 +148,191 @@ document.addEventListener("DOMContentLoaded", () => {
     const params = new URLSearchParams(window.location.search);
     currentRecordId = params.get("id");
   }
-  setupFilterForm();
   renderGrid();
 });
 
-function setupFilterForm() {
-  const form = document.getElementById("filterForm");
-  const input = document.getElementById("filterInput");
-  const clearBtn = document.getElementById("clearFilterBtn");
-  form.addEventListener("submit", e => {
-    e.preventDefault();
-    applyFilter(input.value);
-  });
-  clearBtn.addEventListener("click", () => {
-    input.value = "";
-    applyFilter("");
-  });
-}
-
-function applyFilter(text) {
-  const cfg = hierarchyConfig[0];
-  let filter;
-  if (typeof cfg.filter === "function") {
-    filter = cfg.filter({ currentRecordId });
-  } else {
-    filter = cfg.filter || "";
-  }
-  if (text && text.trim()) {
-    const safeText = text.replace(/'/g, "''");
-    filter += (filter ? " and " : "") + `contains(tolower(name),'${safeText.toLowerCase()}')`;
-  }
-  currentFilter = filter;
-  expandedRows = {};
-  editingCell = null;
-  renderGrid();
-}
-
-function renderChildGridHeader(tbody, childCfg, level) {
-  const tr = document.createElement("tr");
-  tr.classList.add("child-grid-header");
-  tr.dataset.level = level + 2;
-
-  let thIcon = document.createElement("th");
-  thIcon.style.paddingLeft = `calc(13px + ${30 * (level + 1)}px)`;
-  thIcon.textContent = "";
-  tr.appendChild(thIcon);
-
-  let thSelect = document.createElement("th");
-  thSelect.textContent = "";
-  tr.appendChild(thSelect);
-
-  childCfg.columns.forEach(col => {
-    let th = document.createElement("th");
-    th.textContent = col.label;
-    tr.appendChild(th);
-  });
-  tbody.appendChild(tr);
-}
-
-function renderGridHeader(cfg, level) {
-  const headRow = document.getElementById("crmGridHeadRow");
-  headRow.innerHTML = `<th style="width:32px"></th>`;
-  headRow.innerHTML += `<th style="width:24px"></th>`;
-  cfg.columns.forEach(col => {
-    headRow.innerHTML += `<th>${col.label}</th>`;
-  });
-}
-
 async function renderGrid(level = 0, parentRecord = null) {
   const cfg = hierarchyConfig[level];
-  if (level === 0 && cfg.title) {
-    document.getElementById("crmGridTitle").textContent = cfg.title;
-  }
-  renderGridHeader(cfg, level);
-
   const tbody = document.getElementById("crmGridBody");
-  const rowCountElem = document.getElementById("crmGridRowCount");
-  const errorElem = document.getElementById("crmGridError");
+  if (level === 0) tbody.innerHTML = "";
+
+  let filter = "";
   if (level === 0) {
-    tbody.innerHTML = "";
-    errorElem.textContent = "";
-    currentRows = [];
+    filter = cfg.filter ? cfg.filter({ currentRecordId }) : "";
+    if (currentFilter) filter = currentFilter;
+  } else if (parentRecord && cfg.parentField) {
+    const parentCfg = hierarchyConfig[level - 1];
+    const parentId = parentRecord[parentCfg.key];
+    filter = `${cfg.parentField} eq ${formatGuid(parentId)}`;
+    if (cfg.filter) filter += typeof cfg.filter === "function" ? " and " + cfg.filter({ currentRecordId }) : " and " + cfg.filter;
   }
-  try {
-    let filter = "";
-    if (level === 0) {
-      if (typeof cfg.filter === "function") {
-        filter = cfg.filter({ currentRecordId });
-      } else {
-        filter = cfg.filter || "";
-      }
-      if (currentFilter && currentFilter !== filter) {
-        filter = currentFilter;
-      }
-    } else if (parentRecord) {
-      const parentCfg = hierarchyConfig[level - 1];
-      const parentId = parentRecord[parentCfg.key];
-      filter = `${cfg.parentField} eq ${formatGuid(parentId)}`;
-      if (cfg.filter) {
-        if (typeof cfg.filter === "function") {
-          filter += " and " + cfg.filter({ currentRecordId });
-        } else {
-          filter += " and " + cfg.filter;
-        }
-      }
-    }
 
-    const allCols = cfg.columns.map(f => f.key).concat([cfg.key]);
-    if (cfg.parentField) allCols.push(cfg.parentField);
+  const selectCols = cfg.columns.map(f => f.key).concat([cfg.key]);
+  if (cfg.parentField) selectCols.push(cfg.parentField);
 
-    const records = await fetchData(
-      cfg.entitySet,
-      Array.from(new Set(allCols)).join(","),
-      filter
-    );
+  const records = await fetchData(cfg.entitySet, Array.from(new Set(selectCols)).join(","), filter);
+  for (const record of records) await renderRow(tbody, level, record);
 
-    for (const record of records) {
-      await renderRow(tbody, level, record, null);
-    }
-    if (level === 0)
-      rowCountElem.textContent = `${currentRows.length} row${currentRows.length !== 1 ? "s" : ""}`;
-  } catch (e) {
-    if (level === 0) document.getElementById("crmGridError").textContent = e.message;
-  }
+  if (level === 0) document.getElementById("crmGridRowCount").textContent = `${records.length} row${records.length !== 1 ? "s" : ""}`;
 }
 
-async function renderRow(tbody, level, record, parentRow) {
+async function renderRow(tbody, level, record) {
   const cfg = hierarchyConfig[level];
-  const id = record[cfg.key];
-  const rid = rowId(level, id);
-  currentRows.push({ level, id });
+  const rid = rowId(level, record[cfg.key]);
+  currentRows.push({ level, id: record[cfg.key] });
+
   const tr = document.createElement("tr");
   tr.dataset.level = (level + 1);
   tr.dataset.rid = rid;
 
+  // SELECT CELL
   const tdSelect = document.createElement("td");
-  const cfgMultiple = cfg.multiple ?? false;
   if (!selectedRows[level]) selectedRows[level] = new Set();
-  const isChecked = selectedRows[level].has(id);
-  tdSelect.innerHTML = `<input type="${cfgMultiple ? "checkbox" : "radio"}" 
-    name="select-row-level-${level}" 
-    ${isChecked ? "checked" : ""} />`;
-  tdSelect.firstChild.onclick = (e) => {
-    e.stopPropagation();
-    handleRowSelect(level, id, cfgMultiple);
-  };
+  const isChecked = selectedRows[level].has(record[cfg.key]);
+  tdSelect.innerHTML = `<input type="${cfg.multiple ? "checkbox" : "radio"}" ${isChecked ? "checked" : ""} />`;
+  tdSelect.firstChild.onclick = e => { e.stopPropagation(); handleRowSelect(level, record[cfg.key], cfg.multiple); };
   tr.appendChild(tdSelect);
 
+  // ICON CELL
   const tdIcon = document.createElement("td");
   tdIcon.style.paddingLeft = `calc(13px + ${30 * level}px)`;
   if (cfg.child !== undefined) {
     const icon = document.createElement("i");
     icon.className = "crm-icon fa-solid fa-chevron-right";
-    if (expandedRows[rid]) {
-      icon.classList.remove("fa-chevron-right");
-      icon.classList.add("fa-chevron-down");
-    }
-    icon.onclick = async (e) => {
-      e.stopPropagation();
-      expandedRows[rid] = !expandedRows[rid];
-      await renderGrid();
-    };
+    if (expandedRows[rid]) { icon.classList.replace("fa-chevron-right","fa-chevron-down"); }
+    icon.onclick = async e => { e.stopPropagation(); expandedRows[rid] = !expandedRows[rid]; await renderGrid(); };
     tdIcon.appendChild(icon);
-  } else {
-    tdIcon.innerHTML = '<span class="crm-icon crm-icon-empty fa-solid fa-square"></span>';
-  }
+  } else { tdIcon.innerHTML = '<span class="crm-icon crm-icon-empty fa-solid fa-square"></span>'; }
   tr.appendChild(tdIcon);
 
-  cfg.columns.forEach(field => {
+  // DATA CELLS
+  for (const field of cfg.columns) {
     const td = document.createElement("td");
     td.classList.add("crm-data-cell");
-    let val = record[field.key];
-
-    // FIX: show formatted value for lookups & option sets
-    if (record[`${field.key}@OData.Community.Display.V1.FormattedValue`]) {
-      val = record[`${field.key}@OData.Community.Display.V1.FormattedValue`];
-    }
-
-    if (typeof val === "boolean") val = val ? "Yes" : "No";
-    td.textContent = val ?? "";
-    if (field.editable) {
-      td.classList.add("crm-editable-cell");
-      td.onclick = (e) => startEditCell(tr, level, record, field, td);
-    }
-    if (editingCell && editingCell.rid === rid && editingCell.fieldKey === field.key) {
-      td.classList.add("edit-cell");
-      td.innerHTML = '';
-      const input = document.createElement("input");
-      input.type = field.type === "number" ? "number" : "text";
-      input.value = record[field.key] ?? "";
-      input.className = "crm-editbox";
-      input.onkeydown = (ev) => {
-        if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
-        if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
-      };
-      td.appendChild(input);
-      setTimeout(() => input.focus(), 0);
-    }
+    let val = record[field.key] ?? "";
+    if (record[`${field.key}@OData.Community.Display.V1.FormattedValue`]) val = record[`${field.key}@OData.Community.Display.V1.FormattedValue`];
+    if (field.type === "boolean") val = val ? "Yes" : "No";
+    td.textContent = val;
+    if (field.editable) td.onclick = () => startEditCell(tr, record, field, td);
     tr.appendChild(td);
-  });
+  }
 
   tbody.appendChild(tr);
 
+  // CHILD GRID
   if (cfg.child !== undefined && expandedRows[rid]) {
     const childCfg = hierarchyConfig[level + 1];
-    renderChildGridHeader(tbody, childCfg, level);
-    let childFilter = `${childCfg.parentField} eq ${formatGuid(id)}`;
-    if (childCfg.filter) {
-      if (typeof childCfg.filter === "function") {
-        childFilter += " and " + childCfg.filter({ currentRecordId });
-      } else {
-        childFilter += " and " + childCfg.filter;
-      }
-    }
     const childRecords = await fetchData(
       childCfg.entitySet,
       Array.from(new Set(childCfg.columns.map(f => f.key).concat([childCfg.key, childCfg.parentField]))).join(","),
-      childFilter
+      `${childCfg.parentField} eq ${formatGuid(record[cfg.key])}`
     );
-    for (const child of childRecords) {
-      await renderRow(tbody, level + 1, child, tr);
-    }
+    for (const child of childRecords) await renderRow(tbody, level + 1, child);
   }
 }
 
-function handleRowSelect(level, id, multiple) {
-  if (!selectedRows[level]) selectedRows[level] = new Set();
-  if (multiple) {
-    if (selectedRows[level].has(id)) {
-      selectedRows[level].delete(id);
-    } else {
-      selectedRows[level].add(id);
-    }
-  } else {
-    selectedRows[level] = new Set([id]);
-  }
-  renderGrid();
-}
-
-function startEditCell(tr, level, record, field, td) {
+// -------------------- EDIT FUNCTION --------------------
+async function startEditCell(tr, record, field, td) {
   if (editingCell) return;
-  const rid = tr.dataset.rid;
-  editingCell = { rid, fieldKey: field.key, originalValue: record[field.key] };
-  renderGrid();
-}
+  editingCell = { tr, record, field };
+  td.classList.add("edit-cell"); td.innerHTML = "";
 
-function validateField(field, value) {
-  if (field.required && (!value || value === "")) return "Required";
-  if (field.type === "number" && value !== "" && isNaN(Number(value))) return "Invalid number";
-  return null;
-}
+  let input;
 
-async function saveEdit(tr, level, record, field, input, td) {
-  const value = input.value;
-  const err = validateField(field, value);
-  if (err) {
-    input.classList.add("crm-validation-error");
-    input.setCustomValidity(err);
-    input.reportValidity();
-    return;
-  }
-  const update = {};
-  update[field.key] = field.type === "number" ? Number(value) : value;
-  try {
-    const cfg = hierarchyConfig[level];
-    await patchData(cfg.entitySet, record[cfg.key], update);
-  } catch (e) {
-    alert("Save failed: " + e.message);
-  }
-  editingCell = null;
-  renderGrid();
-}
+  if (field.type === "lookup") {
+    input = document.createElement("input");
+    input.type = "text";
+    input.value = td.textContent || "";
 
-function cancelEdit(tr, level, record, field, td) {
-  editingCell = null;
-  renderGrid();
-}
+    // Initial load
+    (async () => {
+      const results = await searchLookup(field.lookupEntity, "");
+      showLookupDropdown(td, input, results, record, field);
+    })();
 
-
-// --- Dynamic OptionSet Metadata Fetcher ---
-const optionSetCache = {};
-
-async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
-    const key = `${entityName}_${fieldName}`;
-    if (optionSetCache[key]) return optionSetCache[key];
-
-    let url = `${baseUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${fieldName}')`;
-    if (fieldType === "choice") {
-        url += "/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet";
-    } else if (fieldType === "boolean") {
-        url += "/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet";
-    } else {
-        return [];
-    }
-
-    const headers = {
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0",
-        "Accept": "application/json",
-        "Content-Type": "application/json; charset=utf-8"
+    input.oninput = async e => {
+      const results = await searchLookup(field.lookupEntity, input.value);
+      showLookupDropdown(td, input, results, record, field);
     };
+  } else if (field.type === "choice") {
+    input = document.createElement("select");
+    const options = await fetchOptionSet(field.entityName || "opportunity", field.key);
+    options.forEach(opt => { const o = document.createElement("option"); o.value = opt.value; o.textContent = opt.label; if (record[field.key] == opt.value) o.selected = true; input.appendChild(o); });
+  } else if (field.type === "boolean") {
+    input = document.createElement("select");
+    [["Yes", true], ["No", false]].forEach(([label, val]) => { const o = document.createElement("option"); o.value = val; o.textContent = label; if (record[field.key] === val) o.selected = true; input.appendChild(o); });
+  } else {
+    input = document.createElement("input"); input.type = field.type==="number"?"number":"text"; input.value = td.textContent || "";
+  }
 
-    const response = await fetch(url, { method: "GET", headers });
-    if (!response.ok) throw new Error("Failed to fetch metadata");
-
-    const data = await response.json();
-    let options = [];
-
-    if (fieldType === "choice") {
-        options = data.OptionSet.Options.map(opt => ({
-            value: opt.Value,
-            label: opt.Label.UserLocalizedLabel?.Label || opt.Value
-        }));
-    } else if (fieldType === "boolean") {
-        options = [
-            { value: true, label: "Yes" },
-            { value: false, label: "No" }
-        ];
-    }
-
-    optionSetCache[key] = options;
-    return options;
+  input.onkeydown = ev => { if(ev.key==="Enter") saveEdit(record, field, input, td); if(ev.key==="Escape") cancelEdit(td); };
+  td.appendChild(input); input.focus();
 }
 
-// --- Modified Cell Editor with Dynamic Dropdown ---
-async function startEditCell(tr, level, record, field, td) {
-    if (editingCell) return;
-    const rid = tr.dataset.rid;
-    editingCell = { rid, fieldKey: field.key, originalValue: record[field.key] };
+async function saveEdit(record, field, input, td) {
+  let value; const updateObj = {};
+  if(field.type==="lookup") {
+    value=input.dataset.id;
+    if(!value) return cancelEdit(td);
+    updateObj[`${field.key}@odata.bind`] = `/${field.lookupEntity}(${value})`;
+  } else {
+    value = input.value;
+    updateObj[field.key] = value;
+  }
+  await patchData(hierarchyConfig[0].entitySet, record[hierarchyConfig[0].key], updateObj);
+  td.textContent = input.value; editingCell=null;
+}
 
-    td.classList.add("edit-cell");
-    td.innerHTML = '';
+function cancelEdit(td){ td.textContent=td.textContent||""; editingCell=null; }
 
-    let input;
+// -------------------- LOOKUP DROPDOWN --------------------
+function showLookupDropdown(td, input, results, record, field) {
+  let dropdown = td.querySelector(".lookup-dropdown");
+  if (!dropdown) {
+    dropdown = document.createElement("div");
+    dropdown.className = "lookup-dropdown";
+    dropdown.style.position = "absolute";
+    dropdown.style.background = "#fff";
+    dropdown.style.border = "1px solid #ccc";
+    dropdown.style.zIndex = "1000";
+    dropdown.style.maxHeight = "200px";
+    dropdown.style.overflowY = "auto";
+    td.appendChild(dropdown);
 
-    if (field.type === "choice" || field.type === "boolean") {
-        input = document.createElement("select");
-        input.className = "crm-editbox";
+    // Scroll event for lazy load
+    dropdown.addEventListener("scroll", async () => {
+      if (dropdown.scrollTop + dropdown.clientHeight >= dropdown.scrollHeight) {
+        let lastCount = dropdown.querySelectorAll("div.lookup-item").length;
+        const moreResults = await searchLookup(field.lookupEntity, input.value, 50, lastCount);
+        appendLookupResults(dropdown, moreResults, input);
+      }
+    });
+  }
 
-        const cfg = hierarchyConfig[level];
-        const entitySet = cfg.entitySet;
-        const entityName = entitySet.slice(0, -1); // crude singularization
+  dropdown.innerHTML = "";
+  appendLookupResults(dropdown, results, input);
+}
 
-        try {
-            const options = await fetchOptionSetMetadata(entityName, field.key, field.type);
-            options.forEach(opt => {
-                const option = document.createElement("option");
-                option.value = opt.value;
-                option.textContent = opt.label;
-                if (record[field.key] == opt.value) option.selected = true;
-                input.appendChild(option);
-            });
-        } catch (e) {
-            console.error("Metadata fetch error:", e);
-            input = document.createElement("input");
-            input.type = "text";
-            input.value = record[field.key] ?? "";
-        }
-    } else {
-        input = document.createElement("input");
-        input.type = field.type === "number" ? "number" : "text";
-        input.value = record[field.key] ?? "";
-        input.className = "crm-editbox";
-    }
-
-    input.onkeydown = (ev) => {
-        if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
-        if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
+function appendLookupResults(dropdown, results, input) {
+  results.forEach(r => {
+    const div = document.createElement("div");
+    div.className = "lookup-item";
+    div.textContent = r.name;
+    div.style.padding = "2px 5px";
+    div.style.cursor = "pointer";
+    div.onclick = () => {
+      input.value = r.name;
+      input.dataset.id = r.id;
+      dropdown.innerHTML = "";
     };
+    dropdown.appendChild(div);
+  });
+}
 
-    td.appendChild(input);
-    setTimeout(() => input.focus(), 0);
+// -------------------- ROW SELECT --------------------
+function handleRowSelect(level,id,multiple){
+  if(!selectedRows[level]) selectedRows[level]=new Set();
+  if(multiple){ selectedRows[level].has(id)?selectedRows[level].delete(id):selectedRows[level].add(id); } 
+  else selectedRows[level]=new Set([id]);
+  renderGrid();
 }
