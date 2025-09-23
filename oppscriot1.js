@@ -596,5 +596,124 @@ async function startEditCell(tr, level, record, field, td) {
     let currentResults = [];
 
     // helper to render results
-    
-    
+    function renderResults(results) {
+      dropdown.innerHTML = "";
+      if (!results || !results.length) {
+        const no = document.createElement("div");
+        no.className = "crm-lookup-item";
+        no.style.padding = "6px 8px";
+        no.style.opacity = "0.7";
+        no.textContent = "No results";
+        dropdown.appendChild(no);
+        dropdown.style.display = "block";
+        dropdown.dataset.open = "true";
+        return;
+      }
+      results.forEach((r, idx) => {
+        const item = document.createElement("div");
+        item.className = "crm-lookup-item";
+        item.style.padding = "6px 8px";
+        item.style.cursor = "pointer";
+        item.style.userSelect = "none";
+        item.dataset.index = idx;
+        item.dataset.id = r.id;
+        item.textContent = r.display || (r.raw && r.raw[nameField]) || r.id;
+        item.onclick = (ev) => {
+          ev.stopPropagation();
+          input.value = item.textContent;
+          input.dataset.lookupId = item.dataset.id;
+          dropdown.style.display = "none";
+          dropdown.dataset.open = "false";
+          // commit save immediately on click
+          saveLookupEdit(tr, level, record, field, input.dataset.lookupId, input.value, td);
+        };
+        dropdown.appendChild(item);
+      });
+      dropdown.style.display = "block";
+      dropdown.dataset.open = "true";
+    }
+
+    // debounce search
+    let timeout;
+    input.addEventListener("input", async (ev) => {
+      clearTimeout(timeout);
+      // clear previously selected id when typing
+      delete input.dataset.lookupId;
+      focusIndex = -1;
+      timeout = setTimeout(async () => {
+        if (!input.value || input.value.trim().length === 0) {
+          dropdown.style.display = "none";
+          dropdown.dataset.open = "false";
+          return;
+        }
+        currentResults = await searchLookup(entitySet, nameField, displayFields, input.value);
+        renderResults(currentResults);
+      }, 250);
+    });
+
+    // keyboard handling: arrows and enter
+    input.addEventListener("keydown", (ev) => {
+      const items = dropdown.querySelectorAll(".crm-lookup-item");
+      if (ev.key === "ArrowDown") {
+        ev.preventDefault();
+        if (!items || items.length === 0) return;
+        focusIndex = Math.min(focusIndex + 1, items.length - 1);
+        items.forEach((it, i) => it.style.background = i === focusIndex ? "#eef6ff" : "");
+      } else if (ev.key === "ArrowUp") {
+        ev.preventDefault();
+        if (!items || items.length === 0) return;
+        focusIndex = Math.max(focusIndex - 1, 0);
+        items.forEach((it, i) => it.style.background = i === focusIndex ? "#eef6ff" : "");
+      } else if (ev.key === "Enter") {
+        ev.preventDefault();
+        if (focusIndex >= 0 && items && items[focusIndex]) {
+          const chosen = items[focusIndex];
+          input.value = chosen.textContent;
+          input.dataset.lookupId = chosen.dataset.id;
+          dropdown.style.display = "none";
+          dropdown.dataset.open = "false";
+          saveLookupEdit(tr, level, record, field, input.dataset.lookupId, input.value, td);
+        } else if (input.dataset.lookupId) {
+          saveLookupEdit(tr, level, record, field, input.dataset.lookupId, input.value, td);
+        } else {
+          // no selection -> try to pick first result
+          if (currentResults.length) {
+            input.value = currentResults[0].display;
+            input.dataset.lookupId = currentResults[0].id;
+            dropdown.style.display = "none";
+            dropdown.dataset.open = "false";
+            saveLookupEdit(tr, level, record, field, input.dataset.lookupId, input.value, td);
+          } else {
+            alert("Please select a lookup record from the dropdown.");
+          }
+        }
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        dropdown.style.display = "none";
+        dropdown.dataset.open = "false";
+        cancelEdit(tr, level, record, field, td);
+      }
+    });
+
+    // avoid bubbling to document click while interacting with dropdown
+    dropdown.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+    });
+
+    // focus input
+    setTimeout(()=> input.focus(), 0);
+    return;
+  }
+
+  // Default: simple input for text or number
+  input = document.createElement("input");
+  input.type = field.type === "number" ? "number" : "text";
+  input.value = record[field.key] ?? "";
+  input.className = "crm-editbox";
+  input.onkeydown = (ev) => {
+    if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
+    if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
+  };
+  td.appendChild(input);
+  setTimeout(()=>input.focus(), 0);
+}
