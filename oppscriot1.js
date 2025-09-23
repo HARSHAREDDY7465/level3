@@ -1,9 +1,16 @@
 // -- Replace with your Dataverse org URL --
 const baseUrl = "https://orgbc876bfc.crm8.dynamics.com"; //-------- This is Development URL ------------
 
+// ----------- COLUMN CONFIGS -----------
 const opportunityColumns = [
   { key: "name", label: "Opportunity Name", editable: true, required: true },
-  { key: "_parentcontactid_value", label: "Customer", editable: false },
+  { 
+    key: "_parentcontactid_value", 
+    label: "Customer", 
+    editable: true, 
+    type: "lookup", 
+    lookup: { entitySet: "contacts", key: "contactid", nameField: "fullname" } 
+  },
   { key: "estimatedvalue", label: "Revenue", editable: true, type: "number" },
   { key: "niq_ishostopportunity", label: "Is Host?", editable: false }
 ];
@@ -22,7 +29,7 @@ const quoteCharacteristicColumns = [
   { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" }
 ];
 
-// ----------- HIERARCHY CONFIG WITH FILTER FUNCTION AND MULTIPLE SELECTION -----------
+// ----------- HIERARCHY CONFIG -----------
 const hierarchyConfig = [
   {
     entitySet: "opportunities",
@@ -305,20 +312,6 @@ async function renderRow(tbody, level, record, parentRow) {
       td.classList.add("crm-editable-cell");
       td.onclick = (e) => startEditCell(tr, level, record, field, td);
     }
-    if (editingCell && editingCell.rid === rid && editingCell.fieldKey === field.key) {
-      td.classList.add("edit-cell");
-      td.innerHTML = '';
-      const input = document.createElement("input");
-      input.type = field.type === "number" ? "number" : "text";
-      input.value = record[field.key] ?? "";
-      input.className = "crm-editbox";
-      input.onkeydown = (ev) => {
-        if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
-        if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
-      };
-      td.appendChild(input);
-      setTimeout(() => input.focus(), 0);
-    }
     tr.appendChild(td);
   });
 
@@ -360,30 +353,22 @@ function handleRowSelect(level, id, multiple) {
   renderGrid();
 }
 
-function startEditCell(tr, level, record, field, td) {
-  if (editingCell) return;
-  const rid = tr.dataset.rid;
-  editingCell = { rid, fieldKey: field.key, originalValue: record[field.key] };
-  renderGrid();
+// --- Lookup Search ---
+async function searchLookup(entitySet, nameField, searchText) {
+  const filter = `contains(${nameField},'${searchText.replace(/'/g, "''")}')`;
+  const records = await fetchData(entitySet, `${nameField},${entitySet.slice(0,-1)}id`, filter);
+  return records.map(r => ({
+    id: r[entitySet.slice(0,-1) + "id"],
+    name: r[nameField]
+  }));
 }
 
-function validateField(field, value) {
-  if (field.required && (!value || value === "")) return "Required";
-  if (field.type === "number" && value !== "" && isNaN(Number(value))) return "Invalid number";
-  return null;
-}
-
-async function saveEdit(tr, level, record, field, input, td) {
-  const value = input.value;
-  const err = validateField(field, value);
-  if (err) {
-    input.classList.add("crm-validation-error");
-    input.setCustomValidity(err);
-    input.reportValidity();
-    return;
-  }
+// --- Save Lookup ---
+async function saveLookupEdit(tr, level, record, field, lookupId, lookupName, td) {
+  if (!lookupId) return; // must select from dropdown
   const update = {};
-  update[field.key] = field.type === "number" ? Number(value) : value;
+  update[`${field.key}@odata.bind`] = `/${field.lookup.entitySet}(${lookupId})`;
+
   try {
     const cfg = hierarchyConfig[level];
     await patchData(cfg.entitySet, record[cfg.key], update);
@@ -394,103 +379,108 @@ async function saveEdit(tr, level, record, field, input, td) {
   renderGrid();
 }
 
-function cancelEdit(tr, level, record, field, td) {
-  editingCell = null;
-  renderGrid();
-}
-
-
 // --- Dynamic OptionSet Metadata Fetcher ---
 const optionSetCache = {};
 
 async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
-    const key = `${entityName}_${fieldName}`;
-    if (optionSetCache[key]) return optionSetCache[key];
+  const key = `${entityName}_${fieldName}`;
+  if (optionSetCache[key]) return optionSetCache[key];
 
-    let url = `${baseUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${fieldName}')`;
-    if (fieldType === "choice") {
-        url += "/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet";
-    } else if (fieldType === "boolean") {
-        url += "/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet";
-    } else {
-        return [];
-    }
+  let url = `${baseUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${fieldName}')`;
+  if (fieldType === "choice") {
+    url += "/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet";
+  } else if (fieldType === "boolean") {
+    url += "/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet";
+  } else {
+    return [];
+  }
 
-    const headers = {
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0",
-        "Accept": "application/json",
-        "Content-Type": "application/json; charset=utf-8"
-    };
+  const headers = {
+    "OData-MaxVersion": "4.0",
+    "OData-Version": "4.0",
+    "Accept": "application/json",
+    "Content-Type": "application/json; charset=utf-8"
+  };
 
-    const response = await fetch(url, { method: "GET", headers });
-    if (!response.ok) throw new Error("Failed to fetch metadata");
+  const response = await fetch(url, { method: "GET", headers });
+  if (!response.ok) throw new Error("Failed to fetch metadata");
 
-    const data = await response.json();
-    let options = [];
+  const data = await response.json();
+  let options = [];
 
-    if (fieldType === "choice") {
-        options = data.OptionSet.Options.map(opt => ({
-            value: opt.Value,
-            label: opt.Label.UserLocalizedLabel?.Label || opt.Value
-        }));
-    } else if (fieldType === "boolean") {
-        options = [
-            { value: true, label: "Yes" },
-            { value: false, label: "No" }
-        ];
-    }
+  if (fieldType === "choice") {
+    options = data.OptionSet.Options.map(opt => ({
+      value: opt.Value,
+      label: opt.Label.UserLocalizedLabel?.Label || opt.Value
+    }));
+  } else if (fieldType === "boolean") {
+    options = [
+      { value: true, label: "Yes" },
+      { value: false, label: "No" }
+    ];
+  }
 
-    optionSetCache[key] = options;
-    return options;
+  optionSetCache[key] = options;
+  return options;
 }
 
-// --- Modified Cell Editor with Dynamic Dropdown ---
+// --- Cell Editor (supports text, number, choice, boolean, lookup) ---
 async function startEditCell(tr, level, record, field, td) {
-    if (editingCell) return;
-    const rid = tr.dataset.rid;
-    editingCell = { rid, fieldKey: field.key, originalValue: record[field.key] };
+  if (editingCell) return;
+  const rid = tr.dataset.rid;
+  editingCell = { rid, fieldKey: field.key, originalValue: record[field.key] };
 
-    td.classList.add("edit-cell");
-    td.innerHTML = '';
+  td.classList.add("edit-cell");
+  td.innerHTML = '';
 
-    let input;
+  let input;
 
-    if (field.type === "choice" || field.type === "boolean") {
-        input = document.createElement("select");
-        input.className = "crm-editbox";
+  if (field.type === "choice" || field.type === "boolean") {
+    input = document.createElement("select");
+    input.className = "crm-editbox";
 
-        const cfg = hierarchyConfig[level];
-        const entitySet = cfg.entitySet;
-        const entityName = entitySet.slice(0, -1); // crude singularization
+    const cfg = hierarchyConfig[level];
+    const entitySet = cfg.entitySet;
+    const entityName = entitySet.slice(0, -1); // crude singularization
 
-        try {
-            const options = await fetchOptionSetMetadata(entityName, field.key, field.type);
-            options.forEach(opt => {
-                const option = document.createElement("option");
-                option.value = opt.value;
-                option.textContent = opt.label;
-                if (record[field.key] == opt.value) option.selected = true;
-                input.appendChild(option);
-            });
-        } catch (e) {
-            console.error("Metadata fetch error:", e);
-            input = document.createElement("input");
-            input.type = "text";
-            input.value = record[field.key] ?? "";
-        }
-    } else {
-        input = document.createElement("input");
-        input.type = field.type === "number" ? "number" : "text";
-        input.value = record[field.key] ?? "";
-        input.className = "crm-editbox";
+    try {
+      const options = await fetchOptionSetMetadata(entityName, field.key, field.type);
+      options.forEach(opt => {
+        const option = document.createElement("option");
+        option.value = opt.value;
+        option.textContent = opt.label;
+        if (record[field.key] == opt.value) option.selected = true;
+        input.appendChild(option);
+      });
+    } catch (e) {
+      console.error("Metadata fetch error:", e);
+      input = document.createElement("input");
+      input.type = "text";
+      input.value = record[field.key] ?? "";
     }
+  }
+  else if (field.type === "lookup") {
+    input = document.createElement("input");
+    input.type = "text";
+    input.value = record[`${field.key}@OData.Community.Display.V1.FormattedValue`] || "";
+    input.className = "crm-editbox";
 
-    input.onkeydown = (ev) => {
-        if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
-        if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
-    };
+    const dropdown = document.createElement("div");
+    dropdown.className = "crm-lookup-dropdown";
+    dropdown.style.position = "absolute";
+    dropdown.style.background = "#fff";
+    dropdown.style.border = "1px solid #ccc";
+    dropdown.style.zIndex = "1000";
+    dropdown.style.display = "none";
 
+    td.style.position = "relative";
     td.appendChild(input);
-    setTimeout(() => input.focus(), 0);
-}
+    td.appendChild(dropdown);
+
+    let timeout;
+    input.addEventListener("input", async () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(async () => {
+        const results = await searchLookup(field.lookup.entitySet, field.lookup.nameField, input.value);
+
+                           
