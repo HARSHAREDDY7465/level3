@@ -1,58 +1,36 @@
-body {
-    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    margin: 20px;
+/* Lookup dropdown styles */
+.crm-lookup-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: auto;
+  background: #fff;
+  border: 1px solid #d0d7e2;
+  border-radius: 4px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 2000;
+  min-width: 220px;
+  font-size: 14px;
 }
 
-.crm-subgrid {
-    width: 100%;
-    border-collapse: collapse;
-    border: 1px solid #d0d0d0;
-    font-size: 14px;
+.crm-lookup-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.crm-subgrid th {
-    background-color: #f3f3f3;
-    border: 1px solid #d0d0d0;
-    padding: 8px;
-    text-align: left;
+.crm-lookup-item:hover {
+  background: #eef6ff;
+  color: #1d4ed8; /* nice blue */
 }
 
-.crm-subgrid td {
-    border: 1px solid #d0d0d0;
-    padding: 8px;
-    vertical-align: middle;
-}
-
-.crm-subgrid tr:nth-child(even) {
-    background-color: #fafafa;
-}
-
-.crm-subgrid tr:hover {
-    background-color: #e6f7ff;
-    cursor: pointer;
-}
-
-.level-1 td {
-    font-weight: bold;
-}
-
-.level-2 td {
-    padding-left: 20px;
-}
-
-.level-3 td {
-    padding-left: 40px;
-}
-
-.expand-icon {
-    cursor: pointer;
-    margin-right: 5px;
-    font-weight: bold;
-    color: #0078d4;
-}
-
-.no-icon {
-    display: inline-block;
-    width: 12px;
-    margin-right: 5px;
+.crm-lookup-item.selected {
+  background: #dbeafe;
+  color: #1e3a8a;
+  font-weight: 600;
 }
