@@ -596,21 +596,5 @@ async function startEditCell(tr, level, record, field, td) {
     let currentResults = [];
 
     // helper to render results
-    function renderResults(results) {
-      dropdown.innerHTML = "";
-      if (!results || !results.length) {
-        const no = document.createElement("div");
-        no.className = "crm-lookup-item";
-        no.style.padding = "6px 8px";
-        no.style.opacity = "0.7";
-        no.textContent = "No results";
-        dropdown.appendChild(no);
-        dropdown.style.display = "block";
-        dropdown.dataset.open = "true";
-        return;
-      }
-      results.forEach((r, idx) => {
-        const item = document.createElement("div");
-        item.className = "crm-lookup-item";
-        item.style.padding = "6px 8px";
-        item.style.cursor
+    
+    
