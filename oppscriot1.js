@@ -9,7 +9,12 @@ const opportunityColumns = [
     label: "Customer", 
     editable: true, 
     type: "lookup", 
-    lookup: { entitySet: "contacts", key: "contactid", nameField: "fullname" } 
+    lookup: { 
+      entitySet: "contacts", 
+      key: "contactid", 
+      nameField: "fullname",
+      displayFields: ["fullname","emailaddress1"] // optional; customize what shows in dropdown
+    } 
   },
   { key: "estimatedvalue", label: "Revenue", editable: true, type: "number" },
   { key: "niq_ishostopportunity", label: "Is Host?", editable: false }
@@ -101,7 +106,10 @@ async function patchData(entitySet, id, updateObj) {
     headers,
     body: JSON.stringify(updateObj)
   });
-  if (!response.ok) throw new Error("Save failed: " + response.statusText);
+  if (!response.ok) {
+    const text = await response.text().catch(()=>null);
+    throw new Error("Save failed: " + response.statusText + (text ? " - " + text : ""));
+  }
   return;
 }
 
@@ -118,6 +126,7 @@ let currentRows = [];
 let currentFilter = "";
 let selectedRows = {};
 
+// small utility to build a row id string
 function rowId(level, id) {
   return `${level}-${id}`;
 }
@@ -131,6 +140,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   setupFilterForm();
   renderGrid();
+  // close any open lookup dropdown on outside click
+  document.addEventListener("click", (ev) => {
+    const openDropdowns = document.querySelectorAll(".crm-lookup-dropdown[data-open='true']");
+    openDropdowns.forEach(d => {
+      d.style.display = "none";
+      d.dataset.open = "false";
+    });
+  });
 });
 
 function setupFilterForm() {
@@ -301,7 +318,7 @@ async function renderRow(tbody, level, record, parentRow) {
     td.classList.add("crm-data-cell");
     let val = record[field.key];
 
-    // FIX: show formatted value for lookups & option sets
+    // show formatted value for lookups & option sets
     if (record[`${field.key}@OData.Community.Display.V1.FormattedValue`]) {
       val = record[`${field.key}@OData.Community.Display.V1.FormattedValue`];
     }
@@ -354,20 +371,37 @@ function handleRowSelect(level, id, multiple) {
 }
 
 // --- Lookup Search ---
-async function searchLookup(entitySet, nameField, searchText) {
-  const filter = `contains(${nameField},'${searchText.replace(/'/g, "''")}')`;
-  const records = await fetchData(entitySet, `${nameField},${entitySet.slice(0,-1)}id`, filter);
-  return records.map(r => ({
-    id: r[entitySet.slice(0,-1) + "id"],
-    name: r[nameField]
-  }));
+// entitySet: "contacts", nameField: "fullname", displayFields: ["fullname","email"], searchText: "ram"
+async function searchLookup(entitySet, nameField, displayFields, searchText) {
+  try {
+    if (!searchText || !searchText.trim()) return [];
+    const search = searchText.replace(/'/g, "''").toLowerCase();
+    const idField = entitySet.slice(0,-1) + "id"; // crude id derivation e.g. contacts -> contactid
+    const selectFields = Array.from(new Set([...(displayFields || [nameField]), idField])).join(",");
+    const filter = `contains(tolower(${nameField}),'${search}')`;
+    const records = await fetchData(entitySet, selectFields, filter);
+    return records.map(r => {
+      const displayParts = (displayFields || [nameField]).map(f => r[f] || "").filter(Boolean);
+      return { id: r[idField], display: displayParts.join(" - "), raw: r };
+    });
+  } catch (e) {
+    console.error("lookup search failed", e);
+    return [];
+  }
 }
 
 // --- Save Lookup ---
+// update via OData bind - compute navProp from field.key: remove leading '_' and trailing '_value'
 async function saveLookupEdit(tr, level, record, field, lookupId, lookupName, td) {
-  if (!lookupId) return; // must select from dropdown
+  if (!lookupId) {
+    alert("Please select a record from the dropdown.");
+    return;
+  }
+
   const update = {};
-  update[`${field.key}@odata.bind`] = `/${field.lookup.entitySet}(${lookupId})`;
+  // derive navigation property from field.key: _parentcontactid_value -> parentcontactid
+  const navProp = (field.key || "").replace(/^_/, "").replace(/_value$/, "");
+  update[`${navProp}@odata.bind`] = `/${field.lookup.entitySet}(${lookupId})`;
 
   try {
     const cfg = hierarchyConfig[level];
@@ -376,7 +410,7 @@ async function saveLookupEdit(tr, level, record, field, lookupId, lookupName, td
     alert("Save failed: " + e.message);
   }
   editingCell = null;
-  renderGrid();
+  await renderGrid();
 }
 
 // --- Dynamic OptionSet Metadata Fetcher ---
@@ -424,6 +458,47 @@ async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
   return options;
 }
 
+// --- Validation & Save for non-lookup fields ---
+function validateField(field, value) {
+  if (field.required && (!value || value === "")) return "Required";
+  if (field.type === "number" && value !== "" && isNaN(Number(value))) return "Invalid number";
+  return null;
+}
+
+async function saveEdit(tr, level, record, field, input, td) {
+  const value = input.value;
+  const err = validateField(field, value);
+  if (err) {
+    input.classList.add("crm-validation-error");
+    input.setCustomValidity(err);
+    input.reportValidity();
+    return;
+  }
+  const update = {};
+  if (field.type === "number") {
+    update[field.key] = value === "" ? null : Number(value);
+  } else if (field.type === "choice" || field.type === "boolean") {
+    // option set values are numeric
+    update[field.key] = value === "" ? null : Number(value);
+  } else {
+    update[field.key] = value;
+  }
+
+  try {
+    const cfg = hierarchyConfig[level];
+    await patchData(cfg.entitySet, record[cfg.key], update);
+  } catch (e) {
+    alert("Save failed: " + e.message);
+  }
+  editingCell = null;
+  await renderGrid();
+}
+
+function cancelEdit(tr, level, record, field, td) {
+  editingCell = null;
+  renderGrid();
+}
+
 // --- Cell Editor (supports text, number, choice, boolean, lookup) ---
 async function startEditCell(tr, level, record, field, td) {
   if (editingCell) return;
@@ -433,8 +508,10 @@ async function startEditCell(tr, level, record, field, td) {
   td.classList.add("edit-cell");
   td.innerHTML = '';
 
+  // common input element
   let input;
 
+  // CHOICE / BOOLEAN -> select populated via metadata
   if (field.type === "choice" || field.type === "boolean") {
     input = document.createElement("select");
     input.className = "crm-editbox";
@@ -445,6 +522,11 @@ async function startEditCell(tr, level, record, field, td) {
 
     try {
       const options = await fetchOptionSetMetadata(entityName, field.key, field.type);
+      // blank option
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "--";
+      input.appendChild(blank);
       options.forEach(opt => {
         const option = document.createElement("option");
         option.value = opt.value;
@@ -457,30 +539,78 @@ async function startEditCell(tr, level, record, field, td) {
       input = document.createElement("input");
       input.type = "text";
       input.value = record[field.key] ?? "";
+      input.className = "crm-editbox";
     }
+    input.onkeydown = (ev) => {
+      if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
+      if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
+    };
+    td.appendChild(input);
+    setTimeout(()=>input.focus(), 0);
+    return;
   }
-  else if (field.type === "lookup") {
+
+  // LOOKUP -> autocomplete dropdown
+  if (field.type === "lookup") {
     input = document.createElement("input");
     input.type = "text";
+    // show formatted display if present
     input.value = record[`${field.key}@OData.Community.Display.V1.FormattedValue`] || "";
     input.className = "crm-editbox";
 
     const dropdown = document.createElement("div");
     dropdown.className = "crm-lookup-dropdown";
-    dropdown.style.position = "absolute";
-    dropdown.style.background = "#fff";
-    dropdown.style.border = "1px solid #ccc";
-    dropdown.style.zIndex = "1000";
-    dropdown.style.display = "none";
+    // basic inline styles so it works without extra CSS
+    Object.assign(dropdown.style, {
+      position: "absolute",
+      background: "#fff",
+      border: "1px solid #ccc",
+      zIndex: 10000,
+      display: "none",
+      maxHeight: "220px",
+      overflowY: "auto",
+      minWidth: "200px",
+      boxShadow: "0 4px 10px rgba(0,0,0,0.08)"
+    });
 
     td.style.position = "relative";
     td.appendChild(input);
     td.appendChild(dropdown);
 
-    let timeout;
-    input.addEventListener("input", async () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(async () => {
-        const results = await searchLookup(field.lookup.entitySet, field.lookup.nameField, input.value);
+    // lookup config
+    const lookupCfg = field.lookup || {};
+    const nameField = lookupCfg.nameField;
+    const displayFields = lookupCfg.displayFields || [nameField];
+    const entitySet = lookupCfg.entitySet;
+    const idField = lookupCfg.key || entitySet.slice(0,-1) + "id";
 
-                           
+    // close dropdown when clicking inside grid but outside the input
+    input.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      // prevent document click from closing immediately
+      dropdown.dataset.open = "true";
+    });
+
+    // keyboard navigation state
+    let focusIndex = -1;
+    let currentResults = [];
+
+    // helper to render results
+    function renderResults(results) {
+      dropdown.innerHTML = "";
+      if (!results || !results.length) {
+        const no = document.createElement("div");
+        no.className = "crm-lookup-item";
+        no.style.padding = "6px 8px";
+        no.style.opacity = "0.7";
+        no.textContent = "No results";
+        dropdown.appendChild(no);
+        dropdown.style.display = "block";
+        dropdown.dataset.open = "true";
+        return;
+      }
+      results.forEach((r, idx) => {
+        const item = document.createElement("div");
+        item.className = "crm-lookup-item";
+        item.style.padding = "6px 8px";
+        item.style.cursor
