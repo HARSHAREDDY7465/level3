@@ -1,6 +1,6 @@
-//---------- Editable Code Starts from here ------------------------
 baseUrl = window.parent.Xrm.Page.context.getClientUrl();
 
+//---------- Editable Code Starts from here ------------------------
 const opportunityColumns = [
   { key: "name", label: "Opportunity Name", editable: true, required: true },
   { 
@@ -16,7 +16,7 @@ const opportunityColumns = [
     } 
   },
   { key: "estimatedvalue", label: "Revenue", editable: true, type: "number" },
-  { key: "niq_ishostopportunity", label: "Is Host?", editable: false }
+  { key: "niq_ishostopportunity", label: "Is Host?", editable: true, type:"boolean" }
 ];
 const quoteColumns = [
   { key: "name", label: "Quote Name", editable: true, required: true },
@@ -167,7 +167,7 @@ function applyFilter(text) {
   }
   if (text && text.trim()) {
     const safeText = text.replace(/'/g, "''");
-    filter += (filter ? " and " : "") + `contains(tolower(name),'${safeText.toLowerCase()}')`;
+    filter += (filter ? " and " : "") + `contains(name,'${safeText}')`;
   }
   currentFilter = filter;
   expandedRows = {};
@@ -448,8 +448,8 @@ async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
         }));
     } else if (fieldType === "boolean") {
         options = [
-            { value: true, label: "Yes" },
-            { value: false, label: "No" }
+            { value: true, label: data.OptionSet.TrueOption.Label.UserLocalizedLabel.Label },
+            { value: false, label: data.OptionSet.FalseOption.Label.UserLocalizedLabel.Label }
         ];
     }
 
