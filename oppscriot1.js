@@ -1,5 +1,5 @@
-// -- Replace with your Dataverse org URL --
-const baseUrl = "https://orgbc876bfc.crm8.dynamics.com"; //-------- This is Development URL ------------
+//---------- Editable Code Starts from here ------------------------
+baseUrl = window.parent.Xrm.Page.context.getClientUrl();
 
 const opportunityColumns = [
   { key: "name", label: "Opportunity Name", editable: true, required: true },
@@ -30,7 +30,8 @@ const quoteLineColumns = [
 const quoteCharacteristicColumns = [
   { key: "niq_name", label: "Feature", editable: true, required: true },
   { key: "niq_type", label: "Type", editable: true, required: true, type: "choice"},
-  { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" }
+  { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" },
+  { key: "_niq_quotedetail_value", label: "Product", editable: true, type: "lookup", lookup:{entitySet: "quotedetails", key:"quotedetailid", nameField: "productname", displayFields: ["productname","createdon"]}}
 ];
 
 // ----------- HIERARCHY CONFIG WITH FILTER FUNCTION AND MULTIPLE SELECTION -----------
@@ -72,7 +73,9 @@ const hierarchyConfig = [
     multiple: true
   }
 ];
+//-------------- Editable Code Ends here --------------------
 
+// ------------- Driver Code starts from here -------------------
 // --- Dataverse fetch helper (no static data) ---
 async function fetchData(entitySet, selectFields, filter = "") {
   let url = `${baseUrl}/api/data/v9.2/${entitySet}?$select=${selectFields}`;
@@ -164,9 +167,7 @@ function applyFilter(text) {
   }
   if (text && text.trim()) {
     const safeText = text.replace(/'/g, "''");
-    // filter += (filter ? " and " : "") + `contains(tolower(name),'${safeText.toLowerCase()}')`;
-    filter += (filter ? " and " : "") + `contains(name,'${safeText}')`;
-
+    filter += (filter ? " and " : "") + `contains(tolower(name),'${safeText.toLowerCase()}')`;
   }
   currentFilter = filter;
   expandedRows = {};
