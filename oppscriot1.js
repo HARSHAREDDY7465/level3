@@ -1,3 +1,10 @@
+/* oppscriot1.js - cleaned full file
+   - fixed $filter (removed tolower())
+   - unified startEditCell (no duplicates)
+   - boolean fields show dropdown using metadata TrueOption/FalseOption labels
+   - grid displays formatted values (including boolean labels)
+*/
+
 baseUrl = window.parent.Xrm.Page.context.getClientUrl();
 
 //---------- Editable Code Starts from here ------------------------
@@ -76,7 +83,6 @@ const hierarchyConfig = [
 //-------------- Editable Code Ends here --------------------
 
 // ------------- Driver Code starts from here -------------------
-// --- Dataverse fetch helper (no static data) ---
 async function fetchData(entitySet, selectFields, filter = "") {
   let url = `${baseUrl}/api/data/v9.2/${entitySet}?$select=${selectFields}`;
   if (filter) url += `&$filter=${encodeURIComponent(filter)}`;
@@ -108,7 +114,10 @@ async function patchData(entitySet, id, updateObj) {
     headers,
     body: JSON.stringify(updateObj)
   });
-  if (!response.ok) throw new Error("Save failed: " + response.statusText);
+  if (!response.ok) {
+    const text = await response.text().catch(()=>null);
+    throw new Error("Save failed: " + response.statusText + (text ? " - " + text : ""));
+  }
   return;
 }
 
@@ -167,6 +176,7 @@ function applyFilter(text) {
   }
   if (text && text.trim()) {
     const safeText = text.replace(/'/g, "''");
+    // FIX: Removed tolower() since Dataverse OData doesn't support tolower() inside contains()
     filter += (filter ? " and " : "") + `contains(name,'${safeText}')`;
   }
   currentFilter = filter;
@@ -311,30 +321,18 @@ async function renderRow(tbody, level, record, parentRow) {
     td.classList.add("crm-data-cell");
     let val = record[field.key];
 
-    // FIX: show formatted value for lookups & option sets
+    // Display formatted values from Dataverse (this includes OptionSet and lookups)
     if (record[`${field.key}@OData.Community.Display.V1.FormattedValue`]) {
       val = record[`${field.key}@OData.Community.Display.V1.FormattedValue`];
     }
 
+    // If still a boolean primitive, convert to Yes/No
     if (typeof val === "boolean") val = val ? "Yes" : "No";
+
     td.textContent = val ?? "";
     if (field.editable) {
       td.classList.add("crm-editable-cell");
       td.onclick = (e) => startEditCell(tr, level, record, field, td);
-    }
-    if (editingCell && editingCell.rid === rid && editingCell.fieldKey === field.key) {
-      td.classList.add("edit-cell");
-      td.innerHTML = '';
-      const input = document.createElement("input");
-      input.type = field.type === "number" ? "number" : "text";
-      input.value = record[field.key] ?? "";
-      input.className = "crm-editbox";
-      input.onkeydown = (ev) => {
-        if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
-        if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
-      };
-      td.appendChild(input);
-      setTimeout(() => input.focus(), 0);
     }
     tr.appendChild(td);
   });
@@ -377,16 +375,18 @@ function handleRowSelect(level, id, multiple) {
   renderGrid();
 }
 
-
-
 function validateField(field, value) {
-  if (field.required && (!value || value === "")) return "Required";
+  if (field.required && (value === null || value === undefined || value === "")) return "Required";
   if (field.type === "number" && value !== "" && isNaN(Number(value))) return "Invalid number";
   return null;
 }
 
 async function saveEdit(tr, level, record, field, input, td) {
-  const value = input.value;
+  let value = input.value;
+  if (field.type === "boolean") {
+    // we store booleans as true/false
+    value = (value === "true" || value === true);
+  }
   const err = validateField(field, value);
   if (err) {
     input.classList.add("crm-validation-error");
@@ -411,12 +411,11 @@ function cancelEdit(tr, level, record, field, td) {
   renderGrid();
 }
 
-
 // --- Dynamic OptionSet Metadata Fetcher ---
 const optionSetCache = {};
 
 async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
-    const key = `${entityName}_${fieldName}`;
+    const key = `${entityName}_${fieldName}_${fieldType}`;
     if (optionSetCache[key]) return optionSetCache[key];
 
     let url = `${baseUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${fieldName}')`;
@@ -436,20 +435,30 @@ async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
     };
 
     const response = await fetch(url, { method: "GET", headers });
-    if (!response.ok) throw new Error("Failed to fetch metadata");
+    if (!response.ok) {
+      const txt = await response.text().catch(()=>"");
+      throw new Error("Failed to fetch metadata: " + response.status + " " + txt);
+    }
 
     const data = await response.json();
     let options = [];
 
     if (fieldType === "choice") {
-        options = data.OptionSet.Options.map(opt => ({
+        options = (data.OptionSet && data.OptionSet.Options || []).map(opt => ({
             value: opt.Value,
-            label: opt.Label.UserLocalizedLabel?.Label || opt.Value
+            label: opt.Label && opt.Label.UserLocalizedLabel ? opt.Label.UserLocalizedLabel.Label : String(opt.Value)
         }));
     } else if (fieldType === "boolean") {
+        // boolean metadata supplies TrueOption and FalseOption
+        const trueLabel = data.OptionSet && data.OptionSet.TrueOption && data.OptionSet.TrueOption.Label && data.OptionSet.TrueOption.Label.UserLocalizedLabel
+            ? data.OptionSet.TrueOption.Label.UserLocalizedLabel.Label
+            : "Yes";
+        const falseLabel = data.OptionSet && data.OptionSet.FalseOption && data.OptionSet.FalseOption.Label && data.OptionSet.FalseOption.Label.UserLocalizedLabel
+            ? data.OptionSet.FalseOption.Label.UserLocalizedLabel.Label
+            : "No";
         options = [
-            { value: true, label: data.OptionSet.TrueOption.Label.UserLocalizedLabel.Label },
-            { value: false, label: data.OptionSet.FalseOption.Label.UserLocalizedLabel.Label }
+            { value: true, label: trueLabel },
+            { value: false, label: falseLabel }
         ];
     }
 
@@ -457,64 +466,12 @@ async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
     return options;
 }
 
-// --- Modified Cell Editor with Dynamic Dropdown ---
-async function startEditCell(tr, level, record, field, td) {
-    if (editingCell) return;
-    const rid = tr.dataset.rid;
-    editingCell = { rid, fieldKey: field.key, originalValue: record[field.key] };
-
-    td.classList.add("edit-cell");
-    td.innerHTML = '';
-
-    let input;
-
-    if (field.type === "choice" || field.type === "boolean") {
-        input = document.createElement("select");
-        input.className = "crm-editbox";
-
-        const cfg = hierarchyConfig[level];
-        const entitySet = cfg.entitySet;
-        const entityName = entitySet.slice(0, -1); // crude singularization
-
-        try {
-            const options = await fetchOptionSetMetadata(entityName, field.key, field.type);
-            options.forEach(opt => {
-                const option = document.createElement("option");
-                option.value = opt.value;
-                option.textContent = opt.label;
-                if (record[field.key] == opt.value) option.selected = true;
-                input.appendChild(option);
-            });
-        } catch (e) {
-            console.error("Metadata fetch error:", e);
-            input = document.createElement("input");
-            input.type = "text";
-            input.value = record[field.key] ?? "";
-        }
-    } else {
-        input = document.createElement("input");
-        input.type = field.type === "number" ? "number" : "text";
-        input.value = record[field.key] ?? "";
-        input.className = "crm-editbox";
-    }
-
-    input.onkeydown = (ev) => {
-        if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
-        if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
-    };
-
-    td.appendChild(input);
-    setTimeout(() => input.focus(), 0);
-}
-
-
 // --- Lookup Search ---
 async function searchLookup(entitySet, nameField, displayFields, searchText) {
   if (!searchText || !searchText.trim()) return [];
   const idField = entitySet.slice(0, -1) + "id";
   const selectFields = Array.from(new Set([...(displayFields || [nameField]), idField])).join(",");
   const filter = `contains(${nameField},'${searchText.replace(/'/g, "''")}')`;
-  console.log("Lookup search:", entitySet, filter);
   const records = await fetchData(entitySet, selectFields, filter);
   return records.map(r => {
     const display = (displayFields || [nameField]).map(f => r[f] || "").filter(Boolean).join(" - ");
@@ -532,53 +489,7 @@ async function saveLookupEdit(level, record, field, lookupId, td) {
   editingCell = null; renderGrid();
 }
 
-// --- Cell Editor ---
-async function startEditCell(tr, level, record, field, td) {
-  if (editingCell) return;
-  editingCell = { rid: tr.dataset.rid, fieldKey: field.key };
-  td.classList.add("edit-cell"); td.innerHTML = "";
-
-  // Lookup
-  if (field.type === "lookup") {
-    const input = document.createElement("input");
-    input.className = "crm-editbox"; input.value = record[`${field.key}@OData.Community.Display.V1.FormattedValue`] || "";
-    const dropdown = document.createElement("div");
-    dropdown.className = "crm-lookup-dropdown"; td.style.position = "relative";
-    td.appendChild(input); td.appendChild(dropdown);
-
-    let timeout; let currentResults = [];
-    input.addEventListener("input", () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(async () => {
-        currentResults = await searchLookup(field.lookup.entitySet, field.lookup.nameField, field.lookup.displayFields, input.value);
-        dropdown.innerHTML = ""; dropdown.style.display = currentResults.length ? "block" : "none";
-        currentResults.forEach(r => {
-          const item = document.createElement("div"); item.className = "crm-lookup-item"; item.textContent = r.display;
-          item.onclick = () => { input.value = r.display; saveLookupEdit(level, record, field, r.id, td); dropdown.style.display = "none"; };
-          dropdown.appendChild(item);
-        });
-      }, 300);
-    });
-    input.onkeydown = (ev) => { if (ev.key === "Escape") { editingCell = null; renderGrid(); } };
-    input.focus(); return;
-  }
-
-  // Text / Number
-  const input = document.createElement("input");
-  input.className = "crm-editbox"; input.type = field.type === "number" ? "number" : "text";
-  input.value = record[field.key] ?? "";
-  input.onkeydown = async (ev) => {
-    if (ev.key === "Enter") {
-      const update = {}; update[field.key] = field.type === "number" ? Number(input.value) : input.value;
-      await patchData(hierarchyConfig[level].entitySet, record[hierarchyConfig[level].key], update);
-      editingCell = null; renderGrid();
-    }
-    if (ev.key === "Escape") { editingCell = null; renderGrid(); }
-  };
-  td.appendChild(input); input.focus();
-}
-
-// --- Unified Cell Editor: supports lookup, choice, boolean, text, number ---
+// --- Unified Cell Editor ---
 async function startEditCell(tr, level, record, field, td) {
     if (editingCell) return;
     const rid = tr.dataset.rid;
@@ -586,7 +497,7 @@ async function startEditCell(tr, level, record, field, td) {
     td.classList.add("edit-cell");
     td.innerHTML = '';
 
-    // Lookup field
+    // Lookup
     if (field.type === "lookup") {
         const input = document.createElement("input");
         input.className = "crm-editbox";
@@ -622,39 +533,55 @@ async function startEditCell(tr, level, record, field, td) {
         return;
     }
 
-    // Choice/Boolean field (OptionSet)
+    // Choice / Boolean
     if (field.type === "choice" || field.type === "boolean") {
-        let input = document.createElement("select");
+        const input = document.createElement("select");
         input.className = "crm-editbox";
+
         const cfg = hierarchyConfig[level];
         const entitySet = cfg.entitySet;
         const entityName = entitySet.slice(0, -1); // crude singularization
+
         try {
             const options = await fetchOptionSetMetadata(entityName, field.key, field.type);
             options.forEach(opt => {
                 const option = document.createElement("option");
-                option.value = opt.value;
+                // store option.value as string to keep select.value consistent
+                option.value = String(opt.value);
                 option.textContent = opt.label;
-                if (record[field.key] == opt.value) option.selected = true;
+                // Compare using loose equality to account for string/boolean/number
+                if (record[field.key] == opt.value || String(record[field.key]) === String(opt.value)) {
+                    option.selected = true;
+                }
                 input.appendChild(option);
             });
         } catch (e) {
             console.error("Metadata fetch error:", e);
-            input = document.createElement("input");
-            input.type = "text";
-            input.value = record[field.key] ?? "";
+            // fallback to Yes/No for boolean
+            if (field.type === "boolean") {
+                input.innerHTML = "<option value='true'>Yes</option><option value='false'>No</option>";
+                if (record[field.key] === true || record[field.key] === "true") input.value = "true";
+                else input.value = "false";
+            } else {
+                // fallback empty input for choice
+                input.innerHTML = "<option value=''>--</option>";
+            }
         }
+
         input.onkeydown = (ev) => {
             if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
             if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
+        };
+        input.onchange = () => {
+          // optional: auto-save on change for selects
         };
         td.appendChild(input);
         setTimeout(() => input.focus(), 0);
         return;
     }
 
-    // Text/Number field
-    let input = document.createElement("input");
+    // Text / Number
+    const input = document.createElement("input");
     input.className = "crm-editbox";
     input.type = field.type === "number" ? "number" : "text";
     input.value = record[field.key] ?? "";
@@ -670,4 +597,3 @@ async function startEditCell(tr, level, record, field, td) {
     td.appendChild(input);
     input.focus();
 }
-
