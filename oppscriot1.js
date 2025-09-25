@@ -1,10 +1,3 @@
-/* oppscriot1.js - cleaned full file
-   - fixed $filter (removed tolower())
-   - unified startEditCell (no duplicates)
-   - boolean fields show dropdown using metadata TrueOption/FalseOption labels
-   - grid displays formatted values (including boolean labels)
-*/
-
 baseUrl = window.parent.Xrm.Page.context.getClientUrl();
 
 //---------- Editable Code Starts from here ------------------------
@@ -27,18 +20,17 @@ const opportunityColumns = [
 ];
 const quoteColumns = [
   { key: "name", label: "Quote Name", editable: true, required: true },
-  { key: "statuscode", label: "Status", editable: true, type: "number" }
+  { key: "statuscode", label: "Status", editable: false, type: "Choice" }
 ];
 const quoteLineColumns = [
-  { key: "productname", label: "Product", editable: true, required: true },
+  { key: "productname", label: "Product", editable: false, required: true },
   { key: "quantity", label: "Quantity", editable: true, type: "number", required: true },
   { key: "extendedamount", label: "Total Amount", editable: false, type: "number", required: true }
 ];
 const quoteCharacteristicColumns = [
   { key: "niq_name", label: "Feature", editable: true, required: true },
   { key: "niq_type", label: "Type", editable: true, required: true, type: "choice"},
-  { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" },
-  { key: "_niq_quotedetail_value", label: "Product", editable: true, type: "lookup", lookup:{entitySet: "quotedetails", key:"quotedetailid", nameField: "productname", displayFields: ["productname","createdon"]}}
+  { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" }
 ];
 
 // ----------- HIERARCHY CONFIG WITH FILTER FUNCTION AND MULTIPLE SELECTION -----------
@@ -176,7 +168,6 @@ function applyFilter(text) {
   }
   if (text && text.trim()) {
     const safeText = text.replace(/'/g, "''");
-    // FIX: Removed tolower() since Dataverse OData doesn't support tolower() inside contains()
     filter += (filter ? " and " : "") + `contains(name,'${safeText}')`;
   }
   currentFilter = filter;
@@ -418,52 +409,54 @@ async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
     const key = `${entityName}_${fieldName}_${fieldType}`;
     if (optionSetCache[key]) return optionSetCache[key];
 
-    let url = `${baseUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${fieldName}')`;
-    if (fieldType === "choice") {
-        url += "/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet";
-    } else if (fieldType === "boolean") {
-        url += "/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?$select=LogicalName&$expand=OptionSet";
-    } else {
-        return [];
+    if (fieldType === "boolean") {
+        // Use Xrm.Utility for Boolean fields
+        try {
+            const metadata = await Xrm.Utility.getEntityMetadata(entityName, [fieldName]);
+            const attr = metadata.Attributes.get(fieldName);
+            if (attr && attr.OptionSet) {
+                const trueOption = attr.OptionSet.TrueOption;
+                const falseOption = attr.OptionSet.FalseOption;
+                const options = [
+                    { value: true, label: trueOption.Label.LocalizedLabels[0].Label },
+                    { value: false, label: falseOption.Label.LocalizedLabels[0].Label }
+                ];
+                optionSetCache[key] = options;
+                return options;
+            }
+        } catch (e) {
+            console.error("Boolean metadata fetch failed:", e);
+            return [
+                { value: true, label: "Yes" },
+                { value: false, label: "No" }
+            ];
+        }
     }
 
-    const headers = {
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0",
-        "Accept": "application/json",
-        "Content-Type": "application/json; charset=utf-8"
-    };
-
-    const response = await fetch(url, { method: "GET", headers });
-    if (!response.ok) {
-      const txt = await response.text().catch(()=>"");
-      throw new Error("Failed to fetch metadata: " + response.status + " " + txt);
-    }
-
-    const data = await response.json();
-    let options = [];
-
     if (fieldType === "choice") {
-        options = (data.OptionSet && data.OptionSet.Options || []).map(opt => ({
+        // still use EntityDefinitions for choice fields
+        const url = `${baseUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${fieldName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet`;
+        const headers = {
+            "OData-MaxVersion": "4.0",
+            "OData-Version": "4.0",
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=utf-8"
+        };
+        const response = await fetch(url, { method: "GET", headers });
+        if (!response.ok) {
+            console.error("Choice metadata fetch failed:", await response.text());
+            return [];
+        }
+        const data = await response.json();
+        const options = data.OptionSet.Options.map(opt => ({
             value: opt.Value,
-            label: opt.Label && opt.Label.UserLocalizedLabel ? opt.Label.UserLocalizedLabel.Label : String(opt.Value)
+            label: opt.Label?.UserLocalizedLabel?.Label || String(opt.Value)
         }));
-    } else if (fieldType === "boolean") {
-        // boolean metadata supplies TrueOption and FalseOption
-        const trueLabel = data.OptionSet && data.OptionSet.TrueOption && data.OptionSet.TrueOption.Label && data.OptionSet.TrueOption.Label.UserLocalizedLabel
-            ? data.OptionSet.TrueOption.Label.UserLocalizedLabel.Label
-            : "Yes";
-        const falseLabel = data.OptionSet && data.OptionSet.FalseOption && data.OptionSet.FalseOption.Label && data.OptionSet.FalseOption.Label.UserLocalizedLabel
-            ? data.OptionSet.FalseOption.Label.UserLocalizedLabel.Label
-            : "No";
-        options = [
-            { value: true, label: trueLabel },
-            { value: false, label: falseLabel }
-        ];
+        optionSetCache[key] = options;
+        return options;
     }
 
-    optionSetCache[key] = options;
-    return options;
+    return [];
 }
 
 // --- Lookup Search ---
