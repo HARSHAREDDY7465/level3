@@ -207,6 +207,15 @@ function renderGridHeader(cfg, level) {
   });
 }
 
+// Function to validate the Estimated Revenue
+function ValidateEstimatedRevenue(field, value){
+  if(field.key == "estimatedvalue" && Number(value)>100000){
+    alert("Estimated Revenue Cannot be More than 1 Lakh!");
+    return false;
+  }
+  return true;
+}
+
 async function renderGrid(level = 0, parentRecord = null) {
   const cfg = hierarchyConfig[level];
   if (level === 0 && cfg.title) {
@@ -385,6 +394,13 @@ async function saveEdit(tr, level, record, field, input, td) {
     input.reportValidity();
     return;
   }
+  // calling ValidateEstimatedRevenue
+  if(!ValidateEstimatedRevenue(field,value)){
+    editingCell = null;
+    renderGrid();
+    return;
+  }
+
   const update = {};
   update[field.key] = field.type === "number" ? Number(value) : value;
   try {
