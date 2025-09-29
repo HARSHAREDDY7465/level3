@@ -438,6 +438,20 @@ async function saveEdit(tr, level, record, field, input, td) {
     input.reportValidity();
     return;
   }
+
+  if(field.type === "lookup"){
+    const selectedId = input && input.dataset ? input.dataset.selectedId: null;
+    if(selectedId){
+        await saveLookupEdit(level, record,field,selectedId, td);
+
+    }
+    else{
+        alert("please select a record from the dropdown");
+        editingCell = null;
+        renderGrid();
+    }
+    return;
+  }
   // calling ValidateGrid
   if(!SubGridEvents.Events.ValidateGrid(field,value)){
     editingCell = null;
@@ -534,12 +548,18 @@ async function searchLookup(entitySet, nameField, displayFields, searchText) {
 
 // --- Save Lookup ---
 async function saveLookupEdit(level, record, field, lookupId, td) {
-  if (!lookupId) return alert("Select a record from dropdown");
-  const navProp = (field.key || "").replace(/^_/, "").replace(/_value$/, "");
-  const update = {}; update[`${navProp}@odata.bind`] = `/${field.lookup.entitySet}(${lookupId})`;
-  const cfg = hierarchyConfig[level];
-  await patchData(cfg.entitySet, record[cfg.key], update);
-  editingCell = null; renderGrid();
+  if (!lookupId){
+    alert("Select a record from dropdown");
+    return;
+  } 
+    const navProp = (field.key || "").replace(/^_/, "").replace(/_value$/, "");
+    console.log("navprop",navProp);
+    const sanitizedId = String(lookupId).replace(/['{}]/g,'');
+    const update = {};
+    update[`${navProp}@odata.bind`] = `/${field.lookup.entitySet}(${sanitizedId})`;
+    const cfg = hierarchyConfig[level];
+    await patchData(cfg.entitySet, record[cfg.key], update);
+    editingCell = null; renderGrid();
 }
 
 // --- Unified Cell Editor ---
@@ -653,5 +673,3 @@ async function startEditCell(tr, level, record, field, td) {
     td.appendChild(input);
     input.focus();
 }
-
-
