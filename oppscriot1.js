@@ -39,7 +39,7 @@ SubGridEvents.Events = {
 const opportunityColumns = [
   { key: "name", label: "Opportunity Name", editable: true, required: true },
   { 
-    key: "_parentcontactid_value",
+    key: "_parentcontactid_value", 
     label: "Customer", 
     editable: true, 
     type: "lookup", 
@@ -77,10 +77,10 @@ const quoteCharacteristicColumns = [
     entitySet: "quotes",
     key: "quoteid",
     nameField: "name",
-    displayFields: ["name", "quotenumber"]
+    displayFields: ["name", "quotenumber"],
+    navigationProperty: "niq_referencingquote"
+    }
   }
-}
-
 ];
 
 // ----------- HIERARCHY CONFIG WITH FILTER FUNCTION AND MULTIPLE SELECTION -----------
@@ -438,12 +438,11 @@ async function saveEdit(tr, level, record, field, input, td) {
     input.reportValidity();
     return;
   }
-
+  
   if(field.type === "lookup"){
     const selectedId = input && input.dataset ? input.dataset.selectedId: null;
     if(selectedId){
         await saveLookupEdit(level, record,field,selectedId, td);
-
     }
     else{
         alert("please select a record from the dropdown");
@@ -452,6 +451,7 @@ async function saveEdit(tr, level, record, field, input, td) {
     }
     return;
   }
+
   // calling ValidateGrid
   if(!SubGridEvents.Events.ValidateGrid(field,value)){
     editingCell = null;
@@ -552,14 +552,29 @@ async function saveLookupEdit(level, record, field, lookupId, td) {
     alert("Select a record from dropdown");
     return;
   } 
-    const navProp = (field.key || "").replace(/^_/, "").replace(/_value$/, "");
-    console.log("navprop",navProp);
-    const sanitizedId = String(lookupId).replace(/['{}]/g,'');
-    const update = {};
-    update[`${navProp}@odata.bind`] = `/${field.lookup.entitySet}(${sanitizedId})`;
-    const cfg = hierarchyConfig[level];
-    await patchData(cfg.entitySet, record[cfg.key], update);
-    editingCell = null; renderGrid();
+  let navProp;
+  if(field.lookup && field.lookup.navigationProperty){
+    navProp = field.lookup.navigationProperty;
+  }else{
+    navProp = field.key.replace(/^_/,"").replace(/_value$/,"");
+
+  }
+  const sanitizedId = String(lookupId).replace(/['{}]/g,'');
+  const update = {};
+  update[`${navProp}@odata.bind`] = `/${field.lookup.entitySet}(${sanitizedId})`;
+  const cfg = hierarchyConfig[level];
+  await patchData(cfg.entitySet, record[cfg.key], update);
+  editingCell = null; renderGrid();
+
+
+    // const navProp = (field.key || "").replace(/^_/, "").replace(/_value$/, "");
+    // console.log("navprop",navProp);
+    // const sanitizedId = String(lookupId).replace(/['{}]/g,'');
+    // const update = {};
+    // update[`${navProp}@odata.bind`] = `/${field.lookup.entitySet}(${sanitizedId})`;
+    // const cfg = hierarchyConfig[level];
+    // await patchData(cfg.entitySet, record[cfg.key], update);
+    // editingCell = null; renderGrid();
 }
 
 // --- Unified Cell Editor ---
