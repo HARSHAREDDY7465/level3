@@ -1,53 +1,19 @@
-async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
-    const key = `${entityName}_${fieldName}_${fieldType}`;
-    if (optionSetCache[key]) return optionSetCache[key];
+Uncaught (in promise) Error: Save failed: - {"error":{"code":"0x80048d19","message":"Error identified in Payload provided by the user for Entity :'', For more information on this error please follow this help link https://go.microsoft.com/fwlink/?linkid=2195293 ----> InnerException : Microsoft.OData.ODataException: An undeclared property 'niq_referencingquote' which only has property annotations in the payload but no property value was found in the payload. In OData, only declared navigation properties and declared named streams can be represented as properties without values.\r\n at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadUndeclaredProperty(IODataJsonLightReaderResourceState resourceState, String propertyName, Boolean propertyWithValue)\r\n at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadPropertyWithoutValue(IODataJsonLightReaderResourceState resourceState, String propertyName)\r\n at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.<>c__DisplayClass9_0.<ReadResourceContent>b__0(PropertyParsingResult propertyParsingResult, String propertyName)\r\n at Microsoft.OData.JsonLight.ODataJsonLightDeserializer.ProcessProperty(PropertyAndAnnotationCollector propertyAndAnnotationCollector, Func`2 readPropertyAnnotationValue, Action`2 handleProperty)\r\n at
 
-    if (fieldType === "boolean") {
-        // Use Xrm.Utility for Boolean fields
-        try {
-            const metadata = await Xrm.Utility.getEntityMetadata(entityName, [fieldName]);
-            const attr = metadata.Attributes.get(fieldName);
-            if (attr && attr.OptionSet) {
-                const trueOption = attr.OptionSet.TrueOption;
-                const falseOption = attr.OptionSet.FalseOption;
-                const options = [
-                    { value: true, label: trueOption.Label.LocalizedLabels[0].Label },
-                    { value: false, label: falseOption.Label.LocalizedLabels[0].Label }
-                ];
-                optionSetCache[key] = options;
-                return options;
-            }
-        } catch (e) {
-            console.error("Boolean metadata fetch failed:", e);
-            return [
-                { value: true, label: "Yes" },
-                { value: false, label: "No" }
-            ];
-        }
-    }
 
-    if (fieldType === "choice") {
-        // still use EntityDefinitions for choice fields
-        const url = `${baseUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${fieldName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet`;
-        const headers = {
-            "OData-MaxVersion": "4.0",
-            "OData-Version": "4.0",
-            "Accept": "application/json",
-            "Content-Type": "application/json; charset=utf-8"
-        };
-        const response = await fetch(url, { method: "GET", headers });
-        if (!response.ok) {
-            console.error("Choice metadata fetch failed:", await response.text());
-            return [];
-        }
-        const data = await response.json();
-        const options = data.OptionSet.Options.map(opt => ({
-            value: opt.Value,
-            label: opt.Label?.UserLocalizedLabel?.Label || String(opt.Value)
-        }));
-        optionSetCache[key] = options;
-        return options;
-    }
-
-    return [];
-}
+const quoteCharacteristicColumns = [
+  { key: "niq_name", label: "Feature", editable: true, required: true },
+  { key: "niq_type", label: "Type", editable: true, required: true, type: "choice"},
+  { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" },
+  { 
+    key: "_niq_referencingquote_value", 
+    label: "Referencing Quote", 
+    editable: true, 
+    type: "lookup", 
+    lookup: { 
+      entitySet: "quotes", 
+      key: "quoteid", 
+      nameField: "name",
+      displayFields: ["name","quotenumber"]
+    } 
+  }
