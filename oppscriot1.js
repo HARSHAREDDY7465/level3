@@ -1,10 +1,45 @@
-baseUrl = window.parent.Xrm.Page.context.getClientUrl();
-
+if (typeof SubGridEvents === "undefined") {
+    SubGridEvents = {
+        __namespace: true,
+    };
+}
 //---------- Editable Code Starts from here ------------------------
+SubGridEvents.Events = {
+  ValidateGrid: function (field, value) {
+    if(!this.ValidateEstimatedRevenue(field, value)){
+        return false;
+    }
+    else{
+        return true;
+    }
+  },
+
+  ValidateEstimatedRevenue: function(field, value){
+    if(field.key == "estimatedvalue" && Number(value)>100000){
+        //   alert("Estimated Revenue Cannot be More than 1 Lakh!");
+        //success, error, warrning, info, question ------ icon types
+        this.CustomAlert('error', 'Error!', 'Estimated Revenue Cannot be More than 1 Lakh!');
+        return false;
+    }
+    return true;
+  },
+
+  CustomAlert: function(Icon, title, message){
+    alertbox.render({
+        alertIcon: Icon,
+        title: title,
+        message: message,
+        btnTitle: 'Ok',
+        themeColor: '#006efeff',
+        border: true
+    });
+  }
+}
+
 const opportunityColumns = [
   { key: "name", label: "Opportunity Name", editable: true, required: true },
   { 
-    key: "_parentcontactid_value", 
+    key: "_parentcontactid_value",
     label: "Customer", 
     editable: true, 
     type: "lookup", 
@@ -16,7 +51,9 @@ const opportunityColumns = [
     } 
   },
   { key: "estimatedvalue", label: "Revenue", editable: true, type: "number" },
-  { key: "niq_ishostopportunity", label: "Is Host?", editable: true, type:"boolean" }
+  { key: "niq_ishostopportunity", label: "Is Host?", editable: true, type:"boolean" },
+  { key: "description", label: "Description", editable: true},
+
 ];
 const quoteColumns = [
   { key: "name", label: "Quote Name", editable: true, required: true },
@@ -30,7 +67,20 @@ const quoteLineColumns = [
 const quoteCharacteristicColumns = [
   { key: "niq_name", label: "Feature", editable: true, required: true },
   { key: "niq_type", label: "Type", editable: true, required: true, type: "choice"},
-  { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" }
+  { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" },
+  {
+  key: "_niq_referencingquote_value",
+  label: "Referencing Quote",
+  editable: true,
+  type: "lookup",
+  lookup: {
+    entitySet: "quotes",
+    key: "quoteid",
+    nameField: "name",
+    displayFields: ["name", "quotenumber"]
+  }
+}
+
 ];
 
 // ----------- HIERARCHY CONFIG WITH FILTER FUNCTION AND MULTIPLE SELECTION -----------
@@ -75,6 +125,9 @@ const hierarchyConfig = [
 //-------------- Editable Code Ends here --------------------
 
 // ------------- Driver Code starts from here -------------------
+
+baseUrl = window.parent.Xrm.Page.context.getClientUrl();
+
 async function fetchData(entitySet, selectFields, filter = "") {
   let url = `${baseUrl}/api/data/v9.2/${entitySet}?$select=${selectFields}`;
   if (filter) url += `&$filter=${encodeURIComponent(filter)}`;
@@ -205,15 +258,6 @@ function renderGridHeader(cfg, level) {
   cfg.columns.forEach(col => {
     headRow.innerHTML += `<th>${col.label}</th>`;
   });
-}
-
-// Function to validate the Estimated Revenue
-function ValidateEstimatedRevenue(field, value){
-  if(field.key == "estimatedvalue" && Number(value)>100000){
-    alert("Estimated Revenue Cannot be More than 1 Lakh!");
-    return false;
-  }
-  return true;
 }
 
 async function renderGrid(level = 0, parentRecord = null) {
@@ -394,8 +438,8 @@ async function saveEdit(tr, level, record, field, input, td) {
     input.reportValidity();
     return;
   }
-  // calling ValidateEstimatedRevenue
-  if(!ValidateEstimatedRevenue(field,value)){
+  // calling ValidateGrid
+  if(!SubGridEvents.Events.ValidateGrid(field,value)){
     editingCell = null;
     renderGrid();
     return;
@@ -596,13 +640,18 @@ async function startEditCell(tr, level, record, field, td) {
     input.value = record[field.key] ?? "";
     input.onkeydown = async (ev) => {
         if (ev.key === "Enter") {
-            const update = {};
-            update[field.key] = field.type === "number" ? Number(input.value) : input.value;
-            await patchData(hierarchyConfig[level].entitySet, record[hierarchyConfig[level].key], update);
-            editingCell = null; renderGrid();
+            // const update = {};
+            // update[field.key] = field.type === "number" ? Number(input.value) : input.value;
+            // await patchData(hierarchyConfig[level].entitySet, record[hierarchyConfig[level].key], update);
+            // editingCell = null; renderGrid();
+
+            await saveEdit(tr, level, record, field, input, td);
         }
-        if (ev.key === "Escape") { editingCell = null; renderGrid(); }
+        // if (ev.key === "Escape") { editingCell = null; renderGrid(); }
+        if(ev.key ==="Escape"){ cancelEdit(tr,level, record, field, td);}
     };
     td.appendChild(input);
     input.focus();
 }
+
+
