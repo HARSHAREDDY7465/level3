@@ -1,2 +1,36 @@
-
-Uncaught (in promise) Error: Save failed: - {"error":{"code":"0x80048d19","message":"Error identified in Payload provided by the user for Entity :'', For more information on this error please follow this help link https://go.microsoft.com/fwlink/?linkid=2195293 ----> InnerException : Microsoft.OData.ODataException: An undeclared property 'niq_referencingquote' which only has property annotations in the payload but no property value was found in the payload. In OData, only declared navigation properties and declared named streams can be represented as properties without values.\r\n at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadUndeclaredProperty(IODataJsonLightReaderResourceState resourceState, String propertyName, Boolean propertyWithValue)\r\n at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadPropertyWithoutValue(IODataJsonLightReaderResourceState resourceState, String propertyName)\r\n at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.<>c__DisplayClass9_0.<ReadResourceContent>b__0(PropertyParsingResult propertyParsingResult, String propertyName)\r\n at Microsoft.OData.JsonLight.ODataJsonLightDeserializer.ProcessProperty(PropertyAndAnnotationCollector propertyAndAnnotationCollector, Func`2 readPropertyAnnotationValue, Action`2 handleProperty)\r\n at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadResourceContent(IODataJsonLightReaderResourceState resourceState)\r\n at Microsoft.OData.JsonLight.ODataJsonLightReader.StartReadingResource()\r\n at Microsoft.OData.JsonLight.ODataJsonLightReader.ReadResourceSetItemStart(PropertyAndAnnotationCollector propertyAndAnnotationCollector, SelectedPropertiesNode selectedProperties)\r\n at Microsoft.OData.JsonLight.ODataJsonLightReader.ReadAtStartImplementationSynchronously(PropertyAndAnnotationCollector propertyAndAnnotationCollector)\r\n at Microsoft.OData.ODataReaderCore.ReadImplementation()\r\n at Microsoft.OData.ODataReaderCore.InterceptException[T](Func`1 action)\r\n at Microsoft.AspNet.OData.Formatter.Deserialization.ODataReaderExtensions.ReadResourceOrResourceSet(ODataReader reader)\r\n at Microsoft.Crm.Extensibility.CrmODataEntityDeserializer.Read(ODataMessageReader messageReader, Type type, ODataDeserializerContext readContext)\r\n at Microsoft.AspNet.OData.Formatter.ODataInputFormatterHelper.ReadFromStream(Type type, Object defaultValue, IEdmModel model, ODataVersion version, Uri baseAddress, IWebApiRequestMessage internalRequest, Func`1 getODataRequestMessage, Func`2 getEdmTypeDeserializer, Func`2 getODataPayloadDeserializer, Func`1 getODataDeserializerContext, Action`1 registerForDisposeAction, Action`1 logErrorAction)."}}
+response
+: 
+Response
+body
+: 
+(...)
+bodyUsed
+: 
+false
+headers
+: 
+Headers {}
+ok
+: 
+false
+redirected
+: 
+false
+status
+: 
+400
+statusText
+: 
+""
+type
+: 
+"basic"
+url
+: 
+"https://orgbc876bfc.crm8.dynamics.com/api/data/v9.2/niq_productcharacteristics(56fed07b-df93-f011-b4cb-6045bdadaab6)"
+[[Prototype]]
+: 
+Response
+updateObj
+: 
+{_niq_referencingquote_value@odata.bind: '/quotes(f26e6a4f-2d9d-f011-bbd2-6045bdaab0e5)'}
