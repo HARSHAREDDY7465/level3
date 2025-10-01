@@ -1,7 +1,5 @@
 if (typeof SubGridEvents === "undefined") {
-    SubGridEvents = {
-        __namespace: true,
-    };
+    SubGridEvents = { __namespace: true };
 }
 //---------- Editable Code Starts from here ------------------------
 SubGridEvents.Events = {
@@ -16,8 +14,6 @@ SubGridEvents.Events = {
 
   ValidateEstimatedRevenue: function(field, value){
     if(field.key == "estimatedvalue" && Number(value)>100000){
-        //   alert("Estimated Revenue Cannot be More than 1 Lakh!");
-        //success, error, warrning, info, question ------ icon types
         this.CustomAlert('error', 'Error!', 'Estimated Revenue Cannot be More than 1 Lakh!');
         return false;
     }
@@ -52,8 +48,7 @@ const opportunityColumns = [
   },
   { key: "estimatedvalue", label: "Revenue", editable: true, type: "number" },
   { key: "niq_ishostopportunity", label: "Is Host?", editable: true, type:"boolean" },
-  { key: "description", label: "Description", editable: true},
-
+  { key: "description", label: "Description", editable: true}
 ];
 const quoteColumns = [
   { key: "name", label: "Quote Name", editable: true, required: true },
@@ -69,20 +64,21 @@ const quoteCharacteristicColumns = [
   { key: "niq_type", label: "Type", editable: true, required: true, type: "choice"},
   { key: "niq_char2", label: "Type2", editable: true, required: true, type: "choice" },
   {
-  key: "_niq_referencingquote_value",
-  label: "Referencing Quote",
-  editable: true,
-  type: "lookup",
-  lookup: {
-    entitySet: "quotes",
-    key: "quoteid",
-    nameField: "name",
-    displayFields: ["name", "quotenumber"]
-    // navigationProperty REMOVED!
+    key: "_niq_referencingquote_value",
+    label: "Referencing Quote",
+    editable: true,
+    type: "lookup",
+    lookup: {
+      entitySet: "quotes",
+      key: "quoteid",
+      nameField: "name",
+      displayFields: ["name", "quotenumber"],
+      navigationProperty : "niq_referencingquote"
     }
   }
 ];
 
+// ----------- HIERARCHY CONFIG WITH FILTER FUNCTION AND MULTIPLE SELECTION -----------
 const hierarchyConfig = [
   {
     entitySet: "opportunities",
@@ -121,6 +117,9 @@ const hierarchyConfig = [
     multiple: true
   }
 ];
+//-------------- Editable Code Ends here --------------------
+
+// ------------- Driver Code starts from here -------------------
 
 baseUrl = window.parent.Xrm.Page.context.getClientUrl();
 
@@ -150,6 +149,7 @@ async function patchData(entitySet, id, updateObj) {
     "Accept": "application/json",
     "Prefer": "return=representation"
   };
+  console.log("PATCH to", url, "with update:", updateObj); // Debug PATCH payload
   const response = await fetch(url, {
     method: "PATCH",
     headers,
@@ -447,7 +447,6 @@ async function saveEdit(tr, level, record, field, input, td) {
     return;
   }
 
-  // calling ValidateGrid
   if(!SubGridEvents.Events.ValidateGrid(field,value)){
     editingCell = null;
     renderGrid();
@@ -545,14 +544,16 @@ async function saveLookupEdit(level, record, field, lookupId, td) {
     alert("Select a record from dropdown");
     return;
   } 
-  // Use fallback logic to get navigation property name
-  // For "_niq_referencingquote_value" this gives "niq_referencingquote"
-  const navProp = field.key.replace(/^_/,"").replace(/_value$/,"");
 
+//   const navProp = field.key.replace(/^_/,"").replace(/_value$/,"");
   const sanitizedId = String(lookupId).replace(/['{}]/g,'');
+  const navProp =field.lookup.navigationProperty ? field.lookup.navigationProperty : field.key.replace(/^_/,"").replace(/_value$/,"");
+
+  
   const update = {};
   update[`${navProp}@odata.bind`] = `/${field.lookup.entitySet}(${sanitizedId})`;
   const cfg = hierarchyConfig[level];
+
   try {
     await patchData(cfg.entitySet, record[cfg.key], update);
   } catch (e) {
