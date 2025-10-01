@@ -1,3 +1,19 @@
+
+this
+: 
+Window
+entitySet
+: 
+"niq_productcharacteristics"
+guid
+: 
+"56fed07b-df93-f011-b4cb-6045bdadaab6"
+headers
+: 
+{OData-MaxVersion: '4.0', OData-Version: '4.0', Content-Type: 'application/json; charset=utf-8', Accept: 'application/json', Prefer: 'return=representation'}
+id
+: 
+"56fed07b-df93-f011-b4cb-6045bdadaab6"
 response
 : 
 Response
@@ -33,4 +49,7 @@ url
 Response
 updateObj
 : 
-{_niq_referencingquote_value@odata.bind: '/quotes(f26e6a4f-2d9d-f011-bbd2-6045bdaab0e5)'}
+{niq_referencingquote@odata.bind: '/quotes(f26e6a4f-2d9d-f011-bbd2-6045bdaab0e5)'}
+url
+: 
+"https://orgbc876bfc.crm8.dynamics.com/api/data/v9.2/niq_productcharacteristics(56fed07b-df93-f011-b4cb-6045bdadaab6)"
