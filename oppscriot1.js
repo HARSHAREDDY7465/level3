@@ -77,13 +77,12 @@ const quoteCharacteristicColumns = [
     entitySet: "quotes",
     key: "quoteid",
     nameField: "name",
-    displayFields: ["name", "quotenumber"],
-    navigationProperty: "niq_referencingquote"
+    displayFields: ["name", "quotenumber"]
+    // navigationProperty REMOVED!
     }
   }
 ];
 
-// ----------- HIERARCHY CONFIG WITH FILTER FUNCTION AND MULTIPLE SELECTION -----------
 const hierarchyConfig = [
   {
     entitySet: "opportunities",
@@ -122,9 +121,6 @@ const hierarchyConfig = [
     multiple: true
   }
 ];
-//-------------- Editable Code Ends here --------------------
-
-// ------------- Driver Code starts from here -------------------
 
 baseUrl = window.parent.Xrm.Page.context.getClientUrl();
 
@@ -428,7 +424,6 @@ function validateField(field, value) {
 async function saveEdit(tr, level, record, field, input, td) {
   let value = input.value;
   if (field.type === "boolean") {
-    // we store booleans as true/false
     value = (value === "true" || value === true);
   }
   const err = validateField(field, value);
@@ -484,7 +479,6 @@ async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
     if (optionSetCache[key]) return optionSetCache[key];
 
     if (fieldType === "boolean") {
-        // Use Xrm.Utility for Boolean fields
         try {
             const metadata = await Xrm.Utility.getEntityMetadata(entityName, [fieldName]);
             const attr = metadata.Attributes.get(fieldName);
@@ -508,7 +502,6 @@ async function fetchOptionSetMetadata(entityName, fieldName, fieldType) {
     }
 
     if (fieldType === "choice") {
-        // still use EntityDefinitions for choice fields
         const url = `${baseUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${fieldName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet`;
         const headers = {
             "OData-MaxVersion": "4.0",
@@ -552,29 +545,20 @@ async function saveLookupEdit(level, record, field, lookupId, td) {
     alert("Select a record from dropdown");
     return;
   } 
-  let navProp;
-  if(field.lookup && field.lookup.navigationProperty){
-    navProp = field.lookup.navigationProperty;
-  }else{
-    navProp = field.key.replace(/^_/,"").replace(/_value$/,"");
+  // Use fallback logic to get navigation property name
+  // For "_niq_referencingquote_value" this gives "niq_referencingquote"
+  const navProp = field.key.replace(/^_/,"").replace(/_value$/,"");
 
-  }
   const sanitizedId = String(lookupId).replace(/['{}]/g,'');
   const update = {};
   update[`${navProp}@odata.bind`] = `/${field.lookup.entitySet}(${sanitizedId})`;
   const cfg = hierarchyConfig[level];
-  await patchData(cfg.entitySet, record[cfg.key], update);
+  try {
+    await patchData(cfg.entitySet, record[cfg.key], update);
+  } catch (e) {
+    alert("Save failed: " + e.message);
+  }
   editingCell = null; renderGrid();
-
-
-    // const navProp = (field.key || "").replace(/^_/, "").replace(/_value$/, "");
-    // console.log("navprop",navProp);
-    // const sanitizedId = String(lookupId).replace(/['{}]/g,'');
-    // const update = {};
-    // update[`${navProp}@odata.bind`] = `/${field.lookup.entitySet}(${sanitizedId})`;
-    // const cfg = hierarchyConfig[level];
-    // await patchData(cfg.entitySet, record[cfg.key], update);
-    // editingCell = null; renderGrid();
 }
 
 // --- Unified Cell Editor ---
@@ -609,6 +593,7 @@ async function startEditCell(tr, level, record, field, td) {
                     item.textContent = r.display;
                     item.onclick = () => {
                         input.value = r.display;
+                        input.dataset.selectedId = r.id;
                         saveLookupEdit(level, record, field, r.id, td);
                         dropdown.style.display = "none";
                     };
@@ -628,16 +613,14 @@ async function startEditCell(tr, level, record, field, td) {
 
         const cfg = hierarchyConfig[level];
         const entitySet = cfg.entitySet;
-        const entityName = entitySet.slice(0, -1); // crude singularization
+        const entityName = entitySet.slice(0, -1);
 
         try {
             const options = await fetchOptionSetMetadata(entityName, field.key, field.type);
             options.forEach(opt => {
                 const option = document.createElement("option");
-                // store option.value as string to keep select.value consistent
                 option.value = String(opt.value);
                 option.textContent = opt.label;
-                // Compare using loose equality to account for string/boolean/number
                 if (record[field.key] == opt.value || String(record[field.key]) === String(opt.value)) {
                     option.selected = true;
                 }
@@ -645,13 +628,11 @@ async function startEditCell(tr, level, record, field, td) {
             });
         } catch (e) {
             console.error("Metadata fetch error:", e);
-            // fallback to Yes/No for boolean
             if (field.type === "boolean") {
                 input.innerHTML = "<option value='true'>Yes</option><option value='false'>No</option>";
                 if (record[field.key] === true || record[field.key] === "true") input.value = "true";
                 else input.value = "false";
             } else {
-                // fallback empty input for choice
                 input.innerHTML = "<option value=''>--</option>";
             }
         }
@@ -659,9 +640,6 @@ async function startEditCell(tr, level, record, field, td) {
         input.onkeydown = (ev) => {
             if (ev.key === "Enter") saveEdit(tr, level, record, field, input, td);
             if (ev.key === "Escape") cancelEdit(tr, level, record, field, td);
-        };
-        input.onchange = () => {
-          // optional: auto-save on change for selects
         };
         td.appendChild(input);
         setTimeout(() => input.focus(), 0);
@@ -675,14 +653,8 @@ async function startEditCell(tr, level, record, field, td) {
     input.value = record[field.key] ?? "";
     input.onkeydown = async (ev) => {
         if (ev.key === "Enter") {
-            // const update = {};
-            // update[field.key] = field.type === "number" ? Number(input.value) : input.value;
-            // await patchData(hierarchyConfig[level].entitySet, record[hierarchyConfig[level].key], update);
-            // editingCell = null; renderGrid();
-
             await saveEdit(tr, level, record, field, input, td);
         }
-        // if (ev.key === "Escape") { editingCell = null; renderGrid(); }
         if(ev.key ==="Escape"){ cancelEdit(tr,level, record, field, td);}
     };
     td.appendChild(input);
