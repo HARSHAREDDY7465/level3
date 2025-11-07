@@ -1,0 +1,187 @@
+Revenue Schedules
+=====================
+
+1. The flow triggers on updates to the niq_isbillingmodified column in the Quote Products table, 
+but only if both niq_lineitemstartdate and niq_lineitemenddate are present.
+
+2. The flow initializes five variables—FlowRunId, Index, SumSchAmt, Termlength, 
+and CustomSchedule—with default values to support subsequent logic execution.
+
+3. The flow retrieves the related Opportunity record from the Opportunities table 
+where _niq_mainquoteid_value matches the current Quote, selecting only the niq_automatedopportunity column.
+
+4. The flow checks if the Opportunity is automated by evaluating niq_automatedopportunity, 
+and based on the result, retrieves the main Quote from the Quotes table accordingly.
+
+5. The flow checks if either of the datasets—automated or non-automated quotes—contains 
+records, using an OR condition to proceed only if at least one has data.
+
+6. The flow updates the related Quote record by setting the EL Revenue Schedule Complete 
+field to No, indicating the billing schedule is not yet finalized.
+
+7. The flow checks that the Billing Schedule Flow Id is not null before proceeding, 
+ensuring billing schedule logic only runs with a valid flow reference.
+
+Condition NO:
+
+1. The flow updates the Quote Product record to store the current Flow Run ID and 
+Revenue Schedule Status, enabling tracking and downstream processing.
+
+2. The flow introduces a 15-second delay to allow asynchronous operations—like Dataverse 
+updates or API calls—to complete before continuing.
+
+3. The flow retrieves all revenue schedules linked to the current Quote Product where the 
+schedule type is either Revenue or Revenue Forecast Excluded, for further processing or validation.
+
+4. The flow loops through all retrieved revenue schedules for the Quote Product and deletes each one, 
+effectively resetting the billing schedule before new entries are created.
+
+5. The flow retrieves the Quote Product record along with its related Quote details using an 
+expand query, enabling access to associated attributes for further logic.
+
+6. The flow uses a Compose action to convert the billing amount (Revenue Frequency) into a 
+float value for accurate calculations.
+
+	Revenue Scope:
+7. The flow uses a FetchXML query to retrieve Quote Product Characteristics filtered by the 
+Quote Product ID and a specific characteristic value code (SC000003), for use in further logic or validation.
+
+8. The flow retrieves the Opportunity record linked to the Quote using its Row ID.
+
+9. The flow checks if the revenue value is less than 100000008 to determine whether to 
+proceed with specific conditional logic.
+
+Condition Yes:
+
+10. The flow calculates a delivery schedule for monthly or ad-hoc billing using the start and 
+end dates (trimmed to date format) and the extended amount
+
+11. The flow checks if the Quote Product is both Ad-hoc (Type = 1) and Time-Based (Is Time Based = 1) 
+before executing the next set of actions.
+
+Condition Yes: 
+
+12. The flow resets SumSchAmt to zero, calculates Termlength as a float based on the number of start dates, 
+and prepares monthly time-based schedule values by converting and formatting the extended amount.
+
+13. The flow iterates through each schedule amount, adds it to the running total (SumSchAmt), 
+and formats the result for precision in further calculations.
+
+14. The flow iterates through all start dates and amounts to add revenue schedule records for each, 
+and increments the index to continue the loop until all items are processed.
+
+
+Condition No:
+
+15. The flow recalculates revenue and billing schedules using dynamic parameters like estimated close date, 
+start/end dates, and flags, via the niq_CalculateSchedules action.
+
+16. The flow initializes and calculates key variables—total amount, formatted schedule amount, term length, 
+and resets the index—to prepare for schedule creation based on recalculated data.
+
+17. The flow iterates through each schedule record, increments the index, and creates a revenue schedule entry 
+with dynamic values like amount, date, currency, and line item reference.
+
+Condition No:
+
+18. If the Quote Product is Ad-hoc, the flow deletes existing revenue schedules, creates new ones based on updated data, 
+updates the Quote Product record, and sets Custom Schedule to true; otherwise, it follows the 
+standard schedule creation process for non-Ad-hoc scenarios.
+
+
+Scope- If Scope is Successful
+
+1. If the scope completes successfully, the flow clears the Revenue Schedule Flow Run ID, updates schedule 
+completion flags, and sets the Revenue Schedule Status dynamically based on delivery frequency or retains 
+the previous status if frequency is not provided.
+
+Scope- Clear Field Value
+
+1. If the main scope fails, is skipped, or times out, the flow clears the Revenue Schedule Flow Run ID and 
+updates schedule completion flags and status on the Quote Product to reflect the error state.
+
+
+Condition YES:
+1. The flow invokes a Cancel Flow scope to terminate the current run using the environment and flow details 
+from workflow(), targeting the specific Revenue Schedule Flow ID.
+
+2. Scope Regenerate Scheduling
+
+1. In this we have same thing what we have in Condition NO
+
+=====================================================
+Billing Schedules:
+=====================================================
+1. The flow is triggered when the niq_isbillingmodified column in the Quote Products table is updated, 
+but only if both niq_lineitemstartdate and niq_lineitemenddate are present.
+
+2. Initialize variables
+
+3. The flow retrieves the Opportunity record linked to the current Quote by filtering on 
+_niq_mainquoteid_value, and extracts the niq_automatedopportunity field for further logic.
+
+4. Determines if an Opportunity is automated and retrieves its main Quote accordingly from the Quotes table.
+
+5. Checks if either of the retrieved Quote collections (automated or non-automated) contains data before proceeding.
+
+6. If Quote data exists, update the Quote to mark EL Billing Schedule as incomplete and proceed 
+only if a valid Billing Schedule Flow Id is present.
+
+Condition NO:
+
+1. Updates the Quote Product row to store the Billing Schedule Flow Run ID and status for tracking and downstream processing.
+
+2. Introduces a 15-second delay to allow asynchronous operations like updates or API calls to complete before continuing.
+
+3. Retrieves all billing schedules linked to the Quote Product with a Billing schedule type for further processing.
+
+4. Deletes all billing schedules linked to the Quote Product to reset or prepare for new schedule creation.
+
+5. Fetches Opportunity stage and related attributes to support conditional logic and further processing.
+
+6. Checks if the Opportunity is automated by evaluating the niq_automatedopportunity field to guide flow branching.
+
+Condition Yes:
+
+Scope Billing:
+
+7. Checks if the billing frequency is not Adhoc to determine whether to follow standard or Adhoc billing logic.
+
+Condition Yes:
+
+8. Prepares structured billing data by composing JSON, converting billing amount to float, and selecting the 
+appropriate transaction currency for further processing.
+
+9. Branches billing logic based on Billing Frequency, applying specific schedule creation rules (
+e.g., 50/50, 80/20, One Time) and product type (Adhoc vs Standard).
+
+10. Handles non-standard billing frequencies by dynamically calculating schedule details and 
+creating schedule records through a loop.
+
+11. Resets the Billing Schedule Flow Run ID to null in the Quote Product to indicate completion 
+or cancellation of the billing process.
+
+Condition No:
+
+12. If billing frequency is Adhoc, deletes all related schedules and updates the Quote Product by 
+clearing the Billing Schedule Flow Run ID.
+
+Scope Success of billing Scope:
+
+13. Updates the Quote Product to clear the Billing Schedule Flow Run ID when the billing process fails or is skipped.
+
+Condition No:
+
+14. Clears the Billing Schedule Flow Run ID in the Quote Product when the condition evaluates to No, 
+indicating the billing process should not proceed.
+
+
+Condition YES:
+
+1. Cancels the active billing flow run using the stored Flow Run ID when the condition evaluates to Yes.
+
+Scope: Re-Trigger
+
+2. Same thing which we did for if Billing schedule is null
+
+ 
