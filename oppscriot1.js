@@ -307,6 +307,58 @@ function updateButtons() {
       input.addEventListener("blur", updateNumberValidation);
       input.addEventListener("change", updateNumberValidation);
     });
+    const emailInputs = container.querySelectorAll(
+      'input[data-datatype="Email"]'
+    );
+
+    emailInputs.forEach((input) => {
+      const questionId = input.dataset.questionid;
+      const errorEl = container.querySelector(
+        `[data-error-for="${questionId}"]`
+      );
+
+      const validateEmailInput = () => {
+        const result = validateEmail(input.value);
+
+        if (!result.isValid) {
+          errorEl.textContent = result.message;
+          errorEl.classList.remove("d-none");
+        } else {
+          errorEl.textContent = "";
+          errorEl.classList.add("d-none");
+        }
+      };
+
+      input.addEventListener("input", validateEmailInput);
+      input.addEventListener("blur", validateEmailInput);
+    });
+
+    const urlInputs = container.querySelectorAll(
+      'input[data-datatype="URL"]'
+    );
+
+    urlInputs.forEach((input) => {
+      const questionId = input.dataset.questionid;
+      const errorEl = container.querySelector(
+        `[data-error-for="${questionId}"]`
+      );
+
+      const validateUrlInput = () => {
+        const result = validateUrl(input.value);
+
+        if (!result.isValid) {
+          errorEl.textContent = result.message;
+          errorEl.classList.remove("d-none");
+        } else {
+          errorEl.textContent = "";
+          errorEl.classList.add("d-none");
+        }
+      };
+
+      input.addEventListener("input", validateUrlInput);
+      input.addEventListener("blur", validateUrlInput);
+    });
+
 
     if (isReadOnly) {
       container
@@ -1467,6 +1519,36 @@ if (dataType === "Lookup") {
 
     return { isValid: true, message: "" };
   }
+  function validateEmail(value) {
+  const emailRegex =
+    /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+  if (!value || value.trim() === "") {
+    return { isValid: true, message: "" };
+  }
+
+  return {
+    isValid: emailRegex.test(value),
+    message: emailRegex.test(value)
+      ? ""
+      : "❌ Please enter a valid email address"
+  };
+}
+function validateUrl(value) {
+  const urlRegex =
+    /^(https?:\/\/)?([\w-]+\.)+[\w-]{2,}(\/.*)?$/i;
+
+  if (!value || value.trim() === "") {
+    return { isValid: true, message: "" };
+  }
+
+  return {
+    isValid: urlRegex.test(value),
+    message: urlRegex.test(value)
+      ? ""
+      : "❌ Please enter a valid URL"
+  };
+}
   // check for mandatory fields input
   function validateCurrentStep() {
     let isValid = true;
@@ -1508,6 +1590,26 @@ if (dataType === "Lookup") {
             errorEl.classList.add("text-danger"); // RED
           }
           return;
+        }
+
+        if (meta.dataType === "Email" && singleInput) {
+          const emailValidation = validateEmail(singleInput.value);
+
+          if (!emailValidation.isValid) {
+            isValid = false;
+            errorEl.textContent = emailValidation.message;
+            errorEl.classList.remove("d-none");
+          }
+        }
+
+        if (meta.dataType === "URL" && singleInput) {
+          const urlValidation = validateUrl(singleInput.value);
+
+          if (!urlValidation.isValid) {
+            isValid = false;
+            errorEl.textContent = urlValidation.message;
+            errorEl.classList.remove("d-none");
+          }
         }
 
         // ===== STEP 2: CHARACTER LIMITS for required text fields =====
