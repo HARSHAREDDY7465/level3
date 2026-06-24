@@ -42,11 +42,13 @@
                 </button> 
             </div>
         </div>
-        
-        <input type="text" class="form-control form-control-sm" placeholder="Enter Application Name" />  
+  
+        <input type="text" id="applicationSearch" class="form-control form-control-sm" placeholder="Search by Application Name or License Name" />
     </div>
     {% for app in applications.results.entities %}
-    <div class="card app-card mb-3">
+    <div class="card app-card mb-3"
+     data-app-name="{{ app.lpi_name | downcase }}"
+     data-license-name="{{ app['LT.lpi_licensename'].label | downcase }}">
     <div class="card-body">
         <div class="app-row">
             <!-- Application Name -->
@@ -130,3 +132,32 @@
         </div>
     </div>
 </div>
+<script>
+      document.addEventListener("DOMContentLoaded", function () {
+
+    const searchInput = document.getElementById("applicationSearch");
+
+    searchInput.addEventListener("keyup", function (e) {
+
+        if (e.key === "Enter") {
+
+            const searchText = this.value.trim().toLowerCase();
+
+            const cards = document.querySelectorAll(".app-card");
+
+            cards.forEach(card => {
+
+                const appName = card.dataset.appName || "";
+                const licenseName = card.dataset.licenseName || "";
+
+                const isMatch =
+                    appName.includes(searchText) ||
+                    licenseName.includes(searchText);
+
+                card.style.display = isMatch ? "" : "none";
+            });
+        }
+    });
+
+});
+</script>
