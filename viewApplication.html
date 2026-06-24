@@ -1,163 +1,123 @@
+The reason I can't give a guaranteed-working single copy-paste file is that your current page searches only the rendered records and your FetchXML must be modified in several places. The easiest approach is to replace the search implementation with a URL-based search.
+
+### 1. Add this near the top
+
+```liquid
 {% assign contactId = user.id %}
 {% assign currentPage = request.params['page'] | default: 1 | integer %}
 {% assign pageSize = 5 %}
+{% assign searchText = request.params['search'] | default: '' %}
 {% assign prevPage = currentPage | minus: 1 | string %}
 {% assign nextPage = currentPage | plus: 1 | string %}
-{% fetchxml applications %}
-<fetch version="1.0" mapping="logical" page="{{ currentPage }}" count="{{ pageSize }}">
-    <entity name="lpi_application">
-        <attribute name="lpi_applicationid" />
-        <attribute name="lpi_contact" />
-        <attribute name="lpi_functionalflow" />
-        <attribute name="lpi_name" />
-        <attribute name="statecode" />
-        <attribute name="statuscode" />
-        <attribute name="lpi_submissiondate" />
-        <order attribute="lpi_name" descending="true" />
-        <filter>
-            <condition attribute="lpi_contact" operator="eq" value="{{ contactId }}" />
-        </filter>
-        <link-entity name="lpi_functionalflow1" from="lpi_functionalflow1id" to="lpi_functionalflow" alias="FF">
-            <link-entity name="lpi_licensetype1" from="lpi_licensetype1id" to="lpi_licensetypeid" alias="LT">
-                <attribute name="lpi_boardname" />
-                <attribute name="lpi_licensename" />
-            </link-entity>
-        </link-entity>
-    </entity>
-</fetch>
-{% endfetchxml %}
-<div class="container mt-3">
-    <div class="card border-0 bg-transparent mb-3">
-        
-        <div class="d-flex align-items-center mb-3">
-            <div class="flex-grow-1 flex-basis-0" style="width: 130px;"></div>
-            
-            <div class="text-center flex-grow-1">
-                <h4 class="fw-semibold text-dark m-0">My Applications</h4> 
-            </div>
-            
-            <div class="flex-grow-1 flex-basis-0 text-end" style="width: 130px;">
-                <button id="applyBtn" class="btn text-white border-0 rounded-2 px-3 py-2 shadow-sm" style="background-color: rgb(0, 94, 184); cursor: pointer;">
-                    <i class="fa fa-paper-plane me-2"></i>Apply Now
-                </button> 
-            </div>
-        </div>
-  
-        <input type="text" id="applicationSearch" class="form-control form-control-sm" placeholder="Search by Application Name or License Name" />
-    </div>
-    {% for app in applications.results.entities %}
-    <div class="card app-card mb-3"
-     data-app-name="{{ app.lpi_name | downcase }}"
-     data-license-name="{{ app['LT.lpi_licensename'].label | downcase }}">
-    <div class="card-body">
-        <div class="app-row">
-            <!-- Application Name -->
-            <div class="app-col-name">
-                {{ app.lpi_name }}
-            </div>
-            
-            <!-- License Name -->
-            <div class="app-col-license">
-                {{ app['LT.lpi_licensename'].label }}
-            </div>
-            
-            <!-- Submitted Date (conditional) -->
-            <div class="app-col-date">
-                {% if app.statuscode.value != 1 %}
-                    <div><strong>Submitted On:</strong></div>
-                    {% if app.lpi_submissiondate %}
-                    <time id="submittion_date" datetime="{{ app.lpi_submissiondate | date_to_iso8601}}"></time>
-                    {% endif %}
-                {% else %}
-                    <!-- invisible placeholder keeps spacing consistent -->
-                    <div style="visibility:hidden;"><strong>Submitted On:</strong></div>
-                    <div style="visibility:hidden;">&nbsp;</div>
-                {% endif %}
-            </div>
-            
-            <!-- Status Badge -->
-            <div class="app-col-status">
-                <span class="badge rounded-pill bg-light text-primary border px-3 py-2">
-                    {{ app.statuscode.label }}
-                </span>
-            </div>
-            
-            <!-- Buttons -->
-            <div class="app-col-actions">
-                {% if app.statuscode.value == 1 %}
-                <button class="btn btn-primary btn-sm action-btn edit-btn"
-                    onclick="openApplication('{{ app.lpi_applicationid }}','{{ app.lpi_functionalflow.id }}')"><i class="fa fa-edit" style="margin-right: 5px;"></i>
-                    Edit
-                </button>
-                <button class="btn btn-outline-danger btn-sm action-btn"
-                    onclick="discardApplication('{{ app.lpi_applicationid }}')"><i class="fa fa-trash" style="margin-right: 5px;"></i>
-                    Discard
-                </button>
-                {% else %}
-                <button class="btn btn-primary btn-sm action-btn view-btn"
-                    onclick="openApplication('{{ app.lpi_applicationid }}','{{ app.lpi_functionalflow.id }}')"><i class="fa fa-eye" style="margin-right:5px"></i>
-                    View
-                </button>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-</div>
-    {% endfor %}
-    {% if applications.results.entities.size == 0 %}
-    <div class="text-center text-muted mt-4">
-        No applications found
-    </div>
+```
+
+### 2. Replace your current FetchXML filter
+
+Replace:
+
+```xml
+<filter>
+    <condition attribute="lpi_contact" operator="eq" value="{{ contactId }}" />
+</filter>
+```
+
+With:
+
+```xml
+<filter type="and">
+    <condition attribute="lpi_contact" operator="eq" value="{{ contactId }}" />
+
+    {% if searchText != '' %}
+    <condition attribute="lpi_name"
+               operator="like"
+               value="%{{ searchText }}%" />
     {% endif %}
-    <!-- Pagination -->
-    <div class="d-flex justify-content-between align-items-center mt-4 mb-3">
-        <div>
-            {% if currentPage > 1 %}
-            <a class="btn btn-outline-secondary btn-sm" href="?page={{ prevPage }}">
-             <i class="fa fa-arrow-left" style="margin-left: 5px";></i>   Previous
-            </a>
-            {% endif %}
-        </div>
-        <div>
-            <span class="small text-muted">
-                Page {{ currentPage }}
-            </span>
-        </div>
-        <div>
-            {% if applications.results.more_records %}
-            <a class="btn btn-outline-primary btn-sm" href="?page={{ nextPage }}">
-                Next <i class="fa fa-arrow-right" style="margin-right: 5px";></i>
-            </a>
-            {% endif %}
-        </div>
-    </div>
-</div>
+</filter>
+```
+
+### 3. Replace the search input
+
+Replace:
+
+```html
+<input type="text" id="applicationSearch" class="form-control form-control-sm" placeholder="Search by Application Name or License Name" />
+```
+
+With:
+
+```html
+<form method="get" id="searchForm">
+    <input type="text"
+           id="applicationSearch"
+           name="search"
+           class="form-control form-control-sm"
+           placeholder="Search by Application Name"
+           value="{{ searchText }}" />
+</form>
+```
+
+### 4. Update pagination links
+
+Previous button:
+
+```html
+<a class="btn btn-outline-secondary btn-sm"
+   href="?page={{ prevPage }}&search={{ searchText | url_escape }}">
+```
+
+Next button:
+
+```html
+<a class="btn btn-outline-primary btn-sm"
+   href="?page={{ nextPage }}&search={{ searchText | url_escape }}">
+```
+
+### 5. Replace the entire current JavaScript search block
+
+Delete the current block that uses:
+
+```javascript
+const cards = document.querySelectorAll(".app-card");
+```
+
+and use:
+
+```html
 <script>
-      document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", function () {
 
     const searchInput = document.getElementById("applicationSearch");
 
-    searchInput.addEventListener("keyup", function (e) {
+    searchInput.addEventListener("keypress", function (e) {
 
         if (e.key === "Enter") {
+            e.preventDefault();
 
-            const searchText = this.value.trim().toLowerCase();
+            const searchValue = this.value.trim();
 
-            const cards = document.querySelectorAll(".app-card");
-
-            cards.forEach(card => {
-
-                const appName = card.dataset.appName || "";
-                const licenseName = card.dataset.licenseName || "";
-
-                const isMatch =
-                    appName.includes(searchText) ||
-                    licenseName.includes(searchText);
-
-                card.style.display = isMatch ? "" : "none";
-            });
+            window.location.href =
+                "?page=1&search=" + encodeURIComponent(searchValue);
         }
     });
 
 });
 </script>
+```
+
+### Result
+
+If you have:
+
+* 100 records
+* Page size = 5
+
+And search `"Test"`:
+
+* Dataverse searches **all 100 records**
+* Matching records are returned
+* Pagination is applied to the filtered result
+* Records from original page 10, 12, etc. are included
+* Search is no longer limited to the current page
+
+**Important:** The above searches only `lpi_name` (Application Name). Searching `LT.lpi_licensename` requires a different FetchXML condition that may or may not be supported depending on your Power Pages relationship configuration. If Application Name search works, I can then help add License Name search safely.
+    
