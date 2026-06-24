@@ -1,0 +1,326 @@
+  <div class="row sectionBlockLayout text-start" style="display: flex; flex-wrap: wrap; margin: 0px; min-height: auto; padding: 8px;">
+      {% assign contactId = user.id %} {% assign pageSize = 4 %}
+      <!-- Three Column Section: Licenses | Applications  | Incidents -->
+      <div class="row sectionBlockLayout text-start" style="display: flex; flex-wrap: wrap; margin: 0px; min-height: auto; padding: 8px;">
+        <div class="container-fluid" style="padding: 0px; display: flex; flex-wrap: wrap;">
+          <!-- LEFT COLUMN (1/3) -->
+          <div class="col-lg-4 columnBlockLayout" style="flex-grow: 1; display: flex; flex-direction: column; min-width: 250px; padding: 20px;">
+            <!-- Section Title + Refresh -->
+            <div class="mb-4" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <h4 class="fw-semibold" style="margin: 0px; color: black; font-family: Open Sans;">Licences</h4>
+              <div>
+                <button id="refreshLic" class="btn button1" style="background: linear-gradient(90deg,#6a11cb,#2575fc); color: #fff; border-radius: 4px; padding:6px 10px; font-family: Open Sans; font-size:13px;"><i class="fa fa-sync" style="margin-right:6px"></i></button>
+              </div>
+            </div>
+            <!-- Fetch Licenses (no single-status filter so we can chart by status) -->
+            {% fetchxml recentLicenses %}
+            <fetch version="1.0" mapping="logical" count="500">
+              <entity name="dgps_license">
+                <attribute name="dgps_licenseid" />
+                <attribute name="lpi_licensetype" />
+                <attribute name="dgps_expirationdate" />
+                <attribute name="dgps_licensestatus" />
+                <attribute name="lpi_contact" />
+                <order attribute="createdon" descending="true" />
+                <link-entity name="lpi_licensetype1" from="lpi_licensetype1id" to="lpi_licensetype" alias="licenseType">
+                  <attribute name="lpi_licensename" />
+                  <attribute name="lpi_licensetypename" />
+                </link-entity>
+                <filter>
+                  <condition attribute="lpi_contact" operator="eq" value="{{ contactId }}" />
+                </filter>
+              </entity>
+            </fetch>
+            {% endfetchxml %}
+            <!-- Licenses Chart Container -->
+            <div id="licensesChartContainer" style="padding: 8px; border: 1px solid #d1d1d1; border-radius: 6px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong style="font-family: Open Sans;">Licenses by Status</strong>
+                <small style="color:#666; font-family: Open Sans;">Pie chart — click a slice to view records</small>
+              </div>
+              <div style="height:260px; position:relative;">
+                <canvas id="licensesPie" aria-label="Licenses by status pie chart"></canvas>
+              </div>
+            </div>
+          </div>
+          <!-- MIDDLE COLUMN (2/3) - RECENT APPLICATIONS (donut chart) -->
+          <div class="col-lg-4 columnBlockLayout" style="flex-grow: 1; display: flex; flex-direction: column; min-width: 250px; padding: 20px;">
+            <div class="mb-4" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <h4 class="fw-semibold" style="margin: 0px; color: black; font-family: Open Sans;">Applications</h4>
+              <div>
+                <button id="refreshApp" class="btn button1" style="background: linear-gradient(90deg,#ff416c,#ff4b2b); color: #fff; border-radius: 4px; padding:6px 10px; font-family: Open Sans; font-size:13px;"><i class="fa fa-sync" style="margin-right:6px"></i></button>
+              </div>
+            </div>
+            <!-- Fetch Recent Applications (no single-status filter so we can chart by status) -->
+            {% fetchxml recentApplications %}
+            <fetch version="1.0" mapping="logical" count="500">
+              <entity name="lpi_application">
+                <attribute name="lpi_applicationid" />
+                <attribute name="lpi_contact" />
+                <attribute name="lpi_functionalflow" />
+                <attribute name="lpi_name" />
+                <attribute name="statecode" />
+                <attribute name="statuscode" />
+                <order attribute="createdon" descending="true" />
+                <filter>
+                  <condition attribute="lpi_contact" operator="eq" value="{{ contactId }}" />
+                </filter>
+                <link-entity name="lpi_functionalflow1" from="lpi_functionalflow1id" to="lpi_functionalflow" alias="FF">
+                  <link-entity name="lpi_licensetype1" from="lpi_licensetype1id" to="lpi_licensetypeid" alias="LT">
+                    <attribute name="lpi_boardname" />
+                    <attribute name="lpi_licensename" />
+                  </link-entity>
+                </link-entity>
+              </entity>
+            </fetch>
+            {% endfetchxml %}
+            <!-- Applications Chart Container -->
+            <div id="applicationsChartContainer" style="padding: 8px; border: 1px solid #d1d1d1; border-radius: 6px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong style="font-family: Open Sans;">Applications by Status</strong>
+                <small style="color:#666; font-family: Open Sans;">Donut chart — click a slice to view records</small>
+              </div>
+              <div style="height:260px; position:relative;">
+                <canvas id="applicationsDonut" aria-label="Applications by status donut chart"></canvas>
+              </div>
+            </div>
+          </div>
+          <!-- RIGHT COLUMN (3/3) -->
+          <div class="col-lg-4 columnBlockLayout" style="flex-grow: 1; display: flex; flex-direction: column; min-width: 250px; padding: 20px;">
+            <div style="border: 1px solid #d1d1d1; border-radius: 6px; padding: 20px; height: 100%;">
+              <h5 style="color: black; font-family: Open Sans; font-weight: 600; margin-bottom: 15px;">Incidents</h5>
+              <p style="color: #666; font-family: Open Sans; font-size: 14px;">Incidents</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Modal for showing records (uses simple markup, no external libs) -->
+    <div id="recordsModal" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background: rgba(0,0,0,0.45); z-index:9999; align-items:center; justify-content:center;">
+      <div style="width:90%; max-width:900px; background:#fff; border-radius:8px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,0.3);">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:linear-gradient(90deg,#141e30,#243b55); color:#fff;">
+          <strong id="modalTitle" style="font-family:Open Sans;">Records</strong>
+          <div>
+            <button id="closeModal" style="background:transparent; border:none; color:#fff; font-size:18px; cursor:pointer;">✕</button>
+          </div>
+        </div>
+        <div style="padding:12px 16px; max-height:60vh; overflow:auto; font-family:Open Sans;">
+          <table id="recordsTable" style="width:100%; border-collapse:collapse;">
+            <thead>
+              <tr style="text-align:left; background:#f7f7f7;">
+                <th style="padding:8px 10px; border-bottom:1px solid #e6e6e6;">S.no</th>
+                <th style="padding:8px 10px; border-bottom:1px solid #e6e6e6;">ID</th>
+                <th style="padding:8px 10px; border-bottom:1px solid #e6e6e6;">License Type / Name</th>
+                <th style="padding:8px 10px; border-bottom:1px solid #e6e6e6;">Status</th>
+                <th style="padding:8px 10px; border-bottom:1px solid #e6e6e6;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="recordsBody"></tbody>
+          </table>
+          <div id="noRecords" style="display:none; padding:28px 8px; text-align:center; color:#666;">No records found</div>
+        </div>
+      </div>
+    </div>
+    <!-- Chart.js and inline script to aggregate the status labels and render charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+      (function() {
+        // ----------------------
+        // Server -> client data
+        // ----------------------
+        {% capture apps_json %}
+        [
+        {% for app in recentApplications.results.entities %}
+          {
+            "id":"{{ app.lpi_applicationid }}",
+            "name":"{{ app.lpi_name | escape | replace: '"','\"' }}",
+            "status":"{% if app.statuscode and app.statuscode.label %}{{ app.statuscode.label | escape | replace: '"','\"' }}{% elsif app.statecode and app.statecode.label %}{{ app.statecode.label | escape | replace: '"','\"' }}{% else %}Unknown{% endif %}",
+            "flowId":"{% if app.lpi_functionalflow and app.lpi_functionalflow.id %}{{ app.lpi_functionalflow.id }}{% else %}{% endif %}",
+            "licenseName":"{% if app['LT.lpi_licensename'] and app['LT.lpi_licensename'].label %}{{ app['LT.lpi_licensename'].label | escape | replace: '"','\"' }}{% else %}{% endif %}",
+            "viewUrl":"https://lpilicensing.powerappsportals.com/Question/?applicationid={{ app.lpi_applicationid }}{% if app.lpi_functionalflow and app.lpi_functionalflow.id %}&flowid={{ app.lpi_functionalflow.id }}{% endif %}"
+          }{% unless forloop.last %},{% endunless %}
+        {% endfor %}
+        ]
+        {% endcapture %}
+
+        {% capture lics_json %}
+        [
+        {% for lic in recentLicenses.results.entities %}
+          {
+            "id":"{{ lic.dgps_licenseid }}",
+            "licenseName":"{% if lic['licenseType.lpi_licensename'] and lic['licenseType.lpi_licensename'].label %}{{ lic['licenseType.lpi_licensename'].label | escape | replace: '"','\"' }}{% else %}{% endif %}",
+            "typeName":"{% if lic['licenseType.lpi_licensetypename'] %}{{ lic['licenseType.lpi_licensetypename'] | escape | replace: '"','\"' }}{% else %}{% endif %}",
+            "expiration":"{% if lic.dgps_expirationdate %}{{ lic.dgps_expirationdate }}{% else %}{% endif %}",
+            "status":"{% if lic.dgps_licensestatus and lic.dgps_licensestatus.label %}{{ lic.dgps_licensestatus.label | escape | replace: '"','\"' }}{% else %}Unknown{% endif %}",
+            "viewUrl":"https://lpilicensing.powerappsportals.com/License-Details/?id={{ lic.dgps_licenseid }}"
+          }{% unless forloop.last %},{% endunless %}
+        {% endfor %}
+        ]
+        {% endcapture %}
+
+        function safeParse(s, name) {
+          try {
+            return JSON.parse(s.replace(/[\r\n\t]+/g,''));
+          } catch (e) {
+            console.error('Failed to parse ' + name, e, s);
+            return [];
+          }
+        }
+        var appsData = safeParse(`{{ apps_json | strip_newlines }}`, 'appsData');
+        var licsData = safeParse(`{{ lics_json | strip_newlines }}`, 'licsData');
+        // ----------------------
+        // Helpers
+        // ----------------------
+        function aggregateCounts(arr, keyName) {
+          var counts = {};
+          for (var i = 0; i < arr.length; i++) {
+            var key = (arr[i] && arr[i][keyName]) ? String(arr[i][keyName]) : 'Unknown';
+            counts[key] = (counts[key] || 0) + 1;
+          }
+          var labels = Object.keys(counts);
+          var data = labels.map(function(l) { return counts[l]; });
+          return { labels: labels, data: data };
+        }
+        // Cooler color palette (pleasant, contrasting)
+        var PRESET_COLORS = ['#3366CC','#DC3912','#FF9900','#109618','#990099','#0099C6','#DD4477','#66AA00','#B82E2E','#316395','#7D3C98','#2E8B57'];
+        function generateColors(n) {
+          var colors = [];
+          for (var i = 0; i < n; i++) {
+            if (i < PRESET_COLORS.length) colors.push(PRESET_COLORS[i]);
+            else colors.push('hsl(' + Math.round((360 * i) / (n || 1)) + ', 70%, 50%)');
+          }
+          return colors;
+        }
+        // Modal helpers
+        var modal = document.getElementById('recordsModal');
+        var modalTitle = document.getElementById('modalTitle');
+        var recordsBody = document.getElementById('recordsBody');
+        var noRecordsEl = document.getElementById('noRecords');
+        function openModal(title, rows) {
+          modalTitle.textContent = title;
+          recordsBody.innerHTML = '';
+          if (!rows || rows.length === 0) {
+            noRecordsEl.style.display = 'block';
+            recordsBody.style.display = 'none';
+          } else {
+            noRecordsEl.style.display = 'none';
+            recordsBody.style.display = 'table-row-group';
+            for (var i=0;i<rows.length;i++) {
+              var r = rows[i];
+              var tr = document.createElement('tr');
+              tr.style.borderBottom = '1px solid #eee';
+              var viewLink = (r.viewUrl && r.viewUrl.length) ? r.viewUrl : '#';
+              tr.innerHTML = '<td style="padding:8px 10px;">' + (i+1) + '</td>' +
+                             '<td style="padding:8px 10px;">' + (r.name || r.typeName) + '</td>' +
+                             '<td style="padding:8px 10px;">' + ((r.licenseName || r.licenseName) || '') + '</td>' +
+                             '<td style="padding:8px 10px;">' + (r.status || '') + '</td>' +
+                             '<td style="padding:8px 10px;"><a href="' + viewLink + '" target="_blank" rel="noopener" style="color:#0e51cb; text-decoration:none;">View</a></td>';
+              recordsBody.appendChild(tr);
+            }
+          }
+          modal.style.display = 'flex';
+        }
+        document.getElementById('closeModal').addEventListener('click', function(){ modal.style.display='none'; });
+        modal.addEventListener('click', function(e){ if (e.target === modal) modal.style.display='none'; });
+        // ----------------------
+        // Chart rendering
+        // ----------------------
+        if (typeof Chart === 'undefined') {
+          console.warn('Chart.js not loaded; charts will not render.');
+          return;
+        }
+        // Applications donut
+        var appAgg = aggregateCounts(appsData, 'status');
+        var appCanvas = document.getElementById('applicationsDonut');
+        var appChart = null;
+        if (appCanvas && appAgg.labels.length > 0) {
+          var ctxApp = appCanvas.getContext('2d');
+          appChart = new Chart(ctxApp, {
+            type: 'doughnut',
+            data: {
+              labels: appAgg.labels,
+              datasets: [{
+                data: appAgg.data,
+                backgroundColor: generateColors(appAgg.labels.length),
+                borderColor: '#ffffff',
+                borderWidth: 1
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 12, padding: 8 } },
+                tooltip: { enabled: true }
+              }
+            }
+          });
+
+          appCanvas.onclick = function(evt) {
+            var points = appChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+            if (points.length) {
+              var idx = points[0].index;
+              var label = appChart.data.labels[idx];
+              var filtered = appsData.filter(function(a){ return (a.status||'Unknown') === label; });
+              openModal('Applications — ' + label, filtered);
+            }
+          };
+        } else {
+          var appContainer = document.getElementById('applicationsChartContainer');
+          if (appContainer) appContainer.innerHTML = '<div class="text-center text-muted" style="padding: 40px 20px; color: #999; font-family: Open Sans;">No recent applications found</div>';
+        }
+        // Licenses pie
+        var licAgg = aggregateCounts(licsData, 'status');
+        var licCanvas = document.getElementById('licensesPie');
+        var licChart = null;
+        if (licCanvas && licAgg.labels.length > 0) {
+          var ctxLic = licCanvas.getContext('2d');
+          licChart = new Chart(ctxLic, {
+            type: 'pie',
+            data: {
+              labels: licAgg.labels,
+              datasets: [{
+                data: licAgg.data,
+                backgroundColor: generateColors(licAgg.labels.length),
+                borderColor: '#ffffff',
+                borderWidth: 1
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 12, padding: 8 } },
+                tooltip: { enabled: true }
+              }
+            }
+          });
+          licCanvas.onclick = function(evt) {
+            var points = licChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+            if (points.length) {
+              var idx = points[0].index;
+              var label = licChart.data.labels[idx];
+              var filtered = licsData.filter(function(l){ return (l.status||'Unknown') === label; });
+              openModal('Licenses — ' + label, filtered);
+            }
+          };
+        } else {
+          var licContainer = document.getElementById('licensesChartContainer');
+          if (licContainer) licContainer.innerHTML = '<div class="text-center text-muted" style="padding: 40px 20px; color: #999; font-family: Open Sans;">No active licenses found</div>';
+        }
+        // ----------------------
+        // Refresh handlers
+        // ----------------------
+        function attachRefresh(id) {
+          var btn = document.getElementById(id);
+          if (!btn) return;
+          btn.addEventListener('click', function() {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa fa-spinner fa-spin" style="margin-right:6px"></i>Refreshing';
+            setTimeout(function(){ location.reload(); }, 250);
+          });
+        }
+        attachRefresh('refreshApp');
+        attachRefresh('refreshLic');
+      })();
+    </script>
