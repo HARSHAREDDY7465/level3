@@ -1,113 +1,88 @@
-In this file, you already have validation functions like:
+Your search box is currently just an input field. It is not connected to any JavaScript filtering logic, so typing and pressing Enter won't do anything. 
 
-* `validateCharacterCount()`
-* `validateNumberRange()`
-* `validateCurrentStep()`
+Change your input to:
 
-So add **Email** and **URL** validation similarly.
-
-### Add these functions near `validateNumberRange()` 
-
-```javascript
-function validateEmail(value) {
-  const emailRegex =
-    /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
-
-  if (!value || value.trim() === "") {
-    return { isValid: true, message: "" };
-  }
-
-  return {
-    isValid: emailRegex.test(value),
-    message: emailRegex.test(value)
-      ? ""
-      : "❌ Please enter a valid email address"
-  };
-}
-
-function validateUrl(value) {
-  const urlRegex =
-    /^(https?:\/\/)?([\w-]+\.)+[\w-]{2,}(\/.*)?$/i;
-
-  if (!value || value.trim() === "") {
-    return { isValid: true, message: "" };
-  }
-
-  return {
-    isValid: urlRegex.test(value),
-    message: urlRegex.test(value)
-      ? ""
-      : "❌ Please enter a valid URL"
-  };
-}
+```html
+<input
+    type="text"
+    id="applicationSearch"
+    class="form-control form-control-sm"
+    placeholder="Search by Application Name or License Name"
+/>
 ```
 
----
+Add a data attribute to each card so we can search both Application Name and License Name:
 
-### Add real-time validation in `renderQuestions()`
+```html
+<div class="card app-card mb-3"
+     data-app-name="{{ app.lpi_name | downcase }}"
+     data-license-name="{{ app['LT.lpi_licensename'].label | downcase }}">
+```
 
-After the Number validation block, add:
+Then add this script at the bottom of the page:
+
+```html
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const searchInput = document.getElementById("applicationSearch");
+
+    searchInput.addEventListener("keyup", function (e) {
+
+        if (e.key === "Enter") {
+
+            const searchText = this.value.trim().toLowerCase();
+
+            const cards = document.querySelectorAll(".app-card");
+
+            cards.forEach(card => {
+
+                const appName = card.dataset.appName || "";
+                const licenseName = card.dataset.licenseName || "";
+
+                const isMatch =
+                    appName.includes(searchText) ||
+                    licenseName.includes(searchText);
+
+                card.style.display = isMatch ? "" : "none";
+            });
+        }
+    });
+
+});
+</script>
+```
+
+### Better UX (recommended)
+
+Instead of requiring Enter, search while typing:
 
 ```javascript
-const emailInputs = container.querySelectorAll(
-  'input[data-datatype="Email"]'
-);
+searchInput.addEventListener("input", function () {
 
-emailInputs.forEach((input) => {
-  const questionId = input.dataset.questionid;
-  const errorEl = container.querySelector(
-    `[data-error-for="${questionId}"]`
-  );
+    const searchText = this.value.trim().toLowerCase();
 
-  const validateEmailInput = () => {
-    const result = validateEmail(input.value);
+    document.querySelectorAll(".app-card").forEach(card => {
 
-    if (!result.isValid) {
-      errorEl.textContent = result.message;
-      errorEl.classList.remove("d-none");
-    } else {
-      errorEl.textContent = "";
-      errorEl.classList.add("d-none");
-    }
-  };
+        const appName = card.dataset.appName || "";
+        const licenseName = card.dataset.licenseName || "";
 
-  input.addEventListener("input", validateEmailInput);
-  input.addEventListener("blur", validateEmailInput);
+        const isMatch =
+            appName.includes(searchText) ||
+            licenseName.includes(searchText);
+
+        card.style.display = isMatch ? "" : "none";
+    });
+
 });
 ```
 
----
+This will allow searching:
 
-### URL validation
+* Application Name (`{{ app.lpi_name }}`)
+* License Name (`{{ app['LT.lpi_licensename'].label }}`)
 
-```javascript
-const urlInputs = container.querySelectorAll(
-  'input[data-datatype="URL"]'
-);
-
-urlInputs.forEach((input) => {
-  const questionId = input.dataset.questionid;
-  const errorEl = container.querySelector(
-    `[data-error-for="${questionId}"]`
-  );
-
-  const validateUrlInput = () => {
-    const result = validateUrl(input.value);
-
-    if (!result.isValid) {
-      errorEl.textContent = result.message;
-      errorEl.classList.remove("d-none");
-    } else {
-      errorEl.textContent = "";
-      errorEl.classList.add("d-none");
-    }
-  };
-
-  input.addEventListener("input", validateUrlInput);
-  input.addEventListener("blur", validateUrlInput);
-});
-```
-
+and the records will immediately filter on the page. If you want the search to work across **all pages** (not just the current page of 5 records), you'll need to move the search into the FetchXML query and reload the page with a search parameter.
 ---
 
 ### Add validation inside `validateCurrentStep()`
