@@ -345,24 +345,28 @@
 {% assign nextPage = currentPage | plus: 1 | string %}
 
 {% fetchxml applications %}
-<fetch version="1.0" output-format="xml-platform" mapping="logical" distinct="false" count="{{ pageSize }}" page="{{ currentPage }}">
+<fetch version="1.0" mapping="logical" page="{{ currentPage }}" count="{{ pageSize }}">
   <entity name="lpi_application">
     <attribute name="lpi_applicationid" />
-    <attribute name="lpi_name" />
-    <attribute name="statuscode" />
-    <attribute name="createdon" />
-    <attribute name="modifiedon" />
-    <attribute name="lpi_submissiondate" />
-    <attribute name="lpi_licenseid" />
-    <order attribute="createdon" descending="true" />
+        <attribute name="lpi_contact" />
+        <attribute name="lpi_functionalflow" />
+        <attribute name="lpi_name" />
+        <attribute name="statecode" />
+        <attribute name="statuscode" />
+        <attribute name="lpi_submissiondate" />
+        <attribute name="lpi_applicationstatus" />
+        <order attribute="lpi_name" descending="true" />
     <filter type="and">
-      <condition attribute="lpi_contactid" operator="eq" value="{{ contactId }}" />
+      <condition attribute="lpi_contact" operator="eq" value="{{ contactId }}" />
       {% if searchText != '' %}
       <condition attribute="lpi_name" operator="like" value="%{{ searchText }}%" />
       {% endif %}
     </filter>
-    <link-entity name="lpi_license" from="lpi_licenseid" to="lpi_licenseid" link-type="outer" alias="LT">
-      <attribute name="lpi_licensename" />
+        <link-entity name="lpi_functionalflow1" from="lpi_functionalflow1id" to="lpi_functionalflow" alias="FF">
+            <link-entity name="lpi_licensetype1" from="lpi_licensetype1id" to="lpi_licensetypeid" alias="LT">
+                <attribute name="lpi_boardname" />
+                <attribute name="lpi_licensename" />
+            </link-entity>
     </link-entity>
   </entity>
 </fetch>
@@ -372,15 +376,19 @@
 {% assign inProgressCount = 0 %}
 {% assign approvedCount = 0 %}
 {% assign rejectedCount = 0 %}
+{% assign draftCount = 0 %}
 
 {% for app in applications.results.entities %}
-  {% if app.statuscode.label == 'In Progress' or app.statuscode.label == 'Draft' or app.statuscode.label == 'Submitted' or app.statuscode.label == 'Pending' %}
+  {% if (app.statecode == 1)}
+    {% assign draftCount = inProgressCount | plus: 1 %}
+  {% endfi %}
+  {% if (app.lpi_applicationstatus.value != 365820009 and app.lpi_applicationstatus.value != 365820010) and app.statuscode.value == 855890001 %}
     {% assign inProgressCount = inProgressCount | plus: 1 %}
   {% endif %}
-  {% if app.statuscode.label == 'Approved' or app.statuscode.label == 'Active' or app.statuscode.label == 'Completed' %}
+  {% if app.lpi_applicationstatus.value == 365820010 %}
     {% assign approvedCount = approvedCount | plus: 1 %}
   {% endif %}
-  {% if app.statuscode.label == 'Rejected' or app.statuscode.label == 'Discarded' or app.statuscode.label == 'Cancelled' or app.statuscode.label == 'Expired' %}
+  {% if app.lpi_applicationstatus.value == 365820009 %}
     {% assign rejectedCount = rejectedCount | plus: 1 %}
   {% endif %}
 {% endfor %}
@@ -409,6 +417,7 @@
       <div class="stat-pill">In Progress ({{ inProgressCount }})</div>
       <div class="stat-pill">Approved ({{ approvedCount }})</div>
       <div class="stat-pill">Rejected ({{ rejectedCount }})</div>
+      <div class="stat-pill">Draft ({{ draftCount}})</div>
     </div>
 
     <div class="table-card">
@@ -427,16 +436,16 @@
           </thead>
           <tbody>
             {% for app in applications.results.entities %}
-            {% assign statusLabel = app.statuscode.label | default: 'Unknown' %}
+            {% assign statusLabel = app.lpi_applicationstatus.label | default: 'Unknown' %}
             {% assign statusClass = 'status-default' %}
 
-            {% if statusLabel == 'In Progress' or statusLabel == 'Draft' or statusLabel == 'Submitted' or statusLabel == 'Pending' %}
+            {% if app.lpi_applicationstatus.value != 365820009 and app.lpi_applicationstatus.value != 365820010  %}
               {% assign statusClass = 'status-inprogress' %}
             {% endif %}
-            {% if statusLabel == 'Approved' or statusLabel == 'Active' or statusLabel == 'Completed' %}
+            {% if app.lpi_applicationstatus.value == 365820010 %}
               {% assign statusClass = 'status-approved' %}
             {% endif %}
-            {% if statusLabel == 'Rejected' or statusLabel == 'Discarded' or statusLabel == 'Cancelled' or statusLabel == 'Expired' %}
+            {% if app.lpi_applicationstatus.value == 365820009 %}
               {% assign statusClass = 'status-rejected' %}
             {% endif %}
 
@@ -471,10 +480,10 @@
               <td>
                 <div class="action-links">
                   {% if app.statuscode.value == 1 %}
-                    <a class="action-link" href="/edit-application?id={{ app.lpi_applicationid }}">Edit</a>
-                    <a class="action-link discard" href="/discard-application?id={{ app.lpi_applicationid }}">Discard</a>
+                    <a class="action-link" onclick="openApplication('{{ app.lpi_applicationid }}','{{ app.lpi_functionalflow.id }}')"><i class="fa fa-edit" style="margin-right: 5px;"></i></a>
+                    <a class="action-link discard" onclick="discardApplication('{{ app.lpi_applicationid }}')"><i class="fa fa-trash" style="margin-right: 5px;"></i></a>
                   {% else %}
-                    <a class="action-link" href="/view-application?id={{ app.lpi_applicationid }}">View</a>
+                    <a class="action-link" onclick="openApplication('{{ app.lpi_applicationid }}','{{ app.lpi_functionalflow.id }}')""><i class="fa fa-eye" style="margin-right:5px"></i></a>
                   {% endif %}
                 </div>
               </td>
