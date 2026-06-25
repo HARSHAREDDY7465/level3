@@ -1,535 +1,381 @@
-<style>
-  :root {
-    --primary: #1f4fa3;
-    --primary-dark: #163d80;
-    --text: #1f2937;
-    --muted: #6b7280;
-    --border: #e5e7eb;
-    --bg: #f5f7fb;
-    --card: #ffffff;
-    --success-bg: #e8f7ee;
-    --success-text: #1f8f4e;
-    --warning-bg: #fff4db;
-    --warning-text: #b7791f;
-    --danger-bg: #fdeaea;
-    --danger-text: #c0392b;
-    --shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
-    --radius: 14px;
-  }
+Add a status filter parameter and drive both the FetchXML query and the active button state from it.
 
-  * {
-    box-sizing: border-box;
-  }
+The cleanest approach is:
 
-  body {
-    margin: 0;
-    font-family: "Segoe UI", Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-  }
+Read a status query param.
+Filter the applications query based on that status.
+Keep the top counters as they are, or compute them from an unfiltered query.
+Turn each status button into a link that passes status=....
+Add an active class when the current filter matches that button.
 
-  .page-wrapper {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 32px 24px 48px;
-  }
+What you need to change
 
-  .content-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    box-shadow: var(--shadow);
-    padding: 28px;
-  }
+Use a parameter like:
 
-  .page-header {
-    margin-bottom: 24px;
-  }
+• all
+• inprogress
+• approved
+• rejected
+• draft
 
-  .page-header h1 {
-    margin: 0 0 8px;
-    font-size: 32px;
-    line-height: 1.2;
-    font-weight: 700;
-    color: #111827;
-  }
+Then when a user clicks a status button, reload the page with that filter and show only those applications.
 
-  .page-header p {
-    margin: 0;
-    font-size: 15px;
-    color: var(--muted);
-  }
+Updated template structure
 
-  .toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 22px;
-    flex-wrap: wrap;
-  }
+Below is a corrected version of your page with the status filter wired in.
 
-  .search-form {
-    flex: 1 1 360px;
-    max-width: 460px;
-    position: relative;
-  }
-
-  .search-form input[type="text"] {
-    width: 100%;
-    height: 46px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 0 16px;
-    font-size: 14px;
-    color: var(--text);
-    background: #fff;
-    outline: none;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  }
-
-  .search-form input[type="text"]:focus {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(31, 79, 163, 0.10);
-  }
-
-  .search-form input[type="text"]::placeholder {
-    color: #9ca3af;
-  }
-
-  .btn-primary {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--primary);
-    color: #fff !important;
-    text-decoration: none;
-    border: none;
-    border-radius: 10px;
-    padding: 12px 18px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s ease;
-    white-space: nowrap;
-  }
-
-  .btn-primary:hover {
-    background: var(--primary-dark);
-  }
-
-  .stats-row {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 24px;
-  }
-
-  .stat-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 16px;
-    border-radius: 999px;
-    background: #f3f4f6;
-    color: #374151;
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .stat-pill.active {
-    background: #e8eefb;
-    color: var(--primary);
-  }
-
-  .table-card {
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    overflow: hidden;
-    background: #fff;
-  }
-
-  .table-responsive {
-    width: 100%;
-    overflow-x: auto;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    min-width: 980px;
-  }
-
-  thead th {
-    text-align: left;
-    font-size: 13px;
-    font-weight: 700;
-    color: #374151;
-    background: #f9fafb;
-    padding: 16px 18px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  tbody td {
-    padding: 18px;
-    font-size: 14px;
-    color: #111827;
-    border-bottom: 1px solid #f0f2f5;
-    vertical-align: middle;
-  }
-
-  tbody tr:last-child td {
-    border-bottom: none;
-  }
-
-  .application-id {
-    font-weight: 700;
-    color: #111827;
-  }
-
-  .license-type {
-    color: #374151;
-    font-weight: 500;
-  }
-
-  .date-text {
-    color: #4b5563;
-    font-size: 14px;
-  }
-
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 6px 12px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1;
-    white-space: nowrap;
-  }
-
-  .status-inprogress,
-  .status-draft,
-  .status-submitted,
-  .status-pending {
-    background: var(--warning-bg);
-    color: var(--warning-text);
-  }
-
-  .status-approved,
-  .status-active,
-  .status-completed {
-    background: var(--success-bg);
-    color: var(--success-text);
-  }
-
-  .status-rejected,
-  .status-discarded,
-  .status-cancelled,
-  .status-expired {
-    background: var(--danger-bg);
-    color: var(--danger-text);
-  }
-
-  .status-default {
-    background: #eef2f7;
-    color: #475569;
-  }
-
-  .action-links {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .action-link {
-    color: var(--primary);
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 14px;
-  }
-
-  .action-link:hover {
-    text-decoration: underline;
-  }
-
-  .action-link.discard {
-    color: #b42318;
-  }
-
-  .table-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    padding: 18px 4px 0;
-    flex-wrap: wrap;
-  }
-
-  .entries-text {
-    color: var(--muted);
-    font-size: 14px;
-  }
-
-  .pagination {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .page-link,
-  .page-current {
-    min-width: 36px;
-    height: 36px;
-    padding: 0 12px;
-    border-radius: 8px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    text-decoration: none;
-    font-size: 14px;
-    font-weight: 600;
-    border: 1px solid var(--border);
-    background: #fff;
-    color: #374151;
-  }
-
-  .page-link:hover {
-    border-color: var(--primary);
-    color: var(--primary);
-  }
-
-  .page-current {
-    background: var(--primary);
-    color: #fff;
-    border-color: var(--primary);
-  }
-
-  .empty-state {
-    padding: 32px 20px;
-    text-align: center;
-    color: var(--muted);
-    font-size: 15px;
-  }
-
-  @media (max-width: 768px) {
-    .page-wrapper {
-      padding: 20px 14px 36px;
-    }
-
-    .content-card {
-      padding: 20px;
-    }
-
-    .page-header h1 {
-      font-size: 26px;
-    }
-
-    .toolbar {
-      align-items: stretch;
-    }
-
-    .search-form {
-      max-width: 100%;
-    }
-  }
-</style>
-
+``liquid
 {% assign contactId = user.id %}
 {% assign currentPage = request.params['page'] | default: 1 | integer %}
 {% assign pageSize = 5 %}
 {% assign searchText = request.params['search'] | default: '' %}
+{% assign selectedStatus = request.params['status'] | default: 'all' %}
+
 {% assign prevPage = currentPage | minus: 1 | string %}
 {% assign nextPage = currentPage | plus: 1 | string %}
 
-{% fetchxml applications %}
-<fetch version="1.0" mapping="logical" page="{{ currentPage }}" count="{{ pageSize }}">
-  <entity name="lpi_application">
-    <attribute name="lpi_applicationid" />
-        <attribute name="lpi_contact" />
-        <attribute name="lpi_functionalflow" />
-        <attribute name="lpi_name" />
-        <attribute name="statecode" />
-        <attribute name="statuscode" />
-        <attribute name="lpi_submissiondate" />
-        <attribute name="lpi_applicationstatus" />
-        <order attribute="lpi_name" descending="true" />
+{% comment %}
+  Query 1: get all applications for counters
+{% endcomment %}
+{% fetchxml allApplications %}
+<fetch returntotalrecordcount="true">
+  <entity name="lpiapplication">
+    <attribute name="lpiapplicationid" />
+    <attribute name="lpiname" />
+    <attribute name="lpisubmissiondate" />
+    <attribute name="modifiedon" />
+    <attribute name="statecode" />
+    <attribute name="statuscode" />
+    <attribute name="lpiapplicationstatus" />
+    <order attribute="modifiedon" descending="true" />
     <filter type="and">
-      <condition attribute="lpi_contact" operator="eq" value="{{ contactId }}" />
+      <condition attribute="lpicontactid" operator="eq" value="{{ contactId }}" />
       {% if searchText != '' %}
-      <condition attribute="lpi_name" operator="like" value="%{{ searchText }}%" />
+        <condition attribute="lpiname" operator="like" value="%{{ searchText }}%" />
       {% endif %}
     </filter>
-        <link-entity name="lpi_functionalflow1" from="lpi_functionalflow1id" to="lpi_functionalflow" alias="FF">
-            <link-entity name="lpi_licensetype1" from="lpi_licensetype1id" to="lpi_licensetypeid" alias="LT">
-                <attribute name="lpi_boardname" />
-                <attribute name="lpi_licensename" />
-            </link-entity>
+    <link-entity name="lpilicensetype" from="lpilicensetypeid" to="lpilicensetype" alias="LT" link-type="outer">
+      <attribute name="lpilicensename" />
     </link-entity>
   </entity>
 </fetch>
 {% endfetchxml %}
 
-{% assign totalCount = applications.results.total_record_count | default: 0 %}
+{% assign totalCount = allApplications.results.totalrecordcount | default: 0 %}
 {% assign inProgressCount = 0 %}
 {% assign approvedCount = 0 %}
 {% assign rejectedCount = 0 %}
 {% assign draftCount = 0 %}
 
-{% for app in applications.results.entities %}
-  {% if (app.statecode == 1)}
-    {% assign draftCount = inProgressCount | plus: 1 %}
-  {% endfi %}
-  {% if (app.lpi_applicationstatus.value != 365820009 and app.lpi_applicationstatus.value != 365820010) and app.statuscode.value == 855890001 %}
+{% for app in allApplications.results.entities %}
+  {% if app.statecode == 1 %}
+    {% assign draftCount = draftCount | plus: 1 %}
+  {% endif %}
+
+  {% if app.lpiapplicationstatus.value != 365820009
+        and app.lpiapplicationstatus.value != 365820010
+        and app.statuscode.value == 855890001 %}
     {% assign inProgressCount = inProgressCount | plus: 1 %}
   {% endif %}
-  {% if app.lpi_applicationstatus.value == 365820010 %}
+
+  {% if app.lpiapplicationstatus.value == 365820010 %}
     {% assign approvedCount = approvedCount | plus: 1 %}
   {% endif %}
-  {% if app.lpi_applicationstatus.value == 365820009 %}
+
+  {% if app.lpiapplicationstatus.value == 365820009 %}
     {% assign rejectedCount = rejectedCount | plus: 1 %}
   {% endif %}
 {% endfor %}
 
-<div class="page-wrapper">
-  <div class="content-card">
-    <div class="page-header">
-      <h1>Applications</h1>
-      <p>Track and manage all your license applications.</p>
-    </div>
+{% comment %}
+  Query 2: get filtered applications for listing
+{% endcomment %}
+{% fetchxml applications %}
+<fetch returntotalrecordcount="true" page="{{ currentPage }}" count="{{ pageSize }}">
+  <entity name="lpiapplication">
+    <attribute name="lpiapplicationid" />
+    <attribute name="lpiname" />
+    <attribute name="lpisubmissiondate" />
+    <attribute name="modifiedon" />
+    <attribute name="statecode" />
+    <attribute name="statuscode" />
+    <attribute name="lpiapplicationstatus" />
+    <order attribute="modifiedon" descending="true" />
+    <filter type="and">
+      <condition attribute="lpicontactid" operator="eq" value="{{ contactId }}" />
 
-    <div class="toolbar">
-      <form method="get" class="search-form">
-        <input
-          type="text"
-          name="search"
-          value="{{ searchText }}"
-          placeholder="Search applications..." />
-      </form>
-
-      <a href="/apply-now" class="btn-primary">New Application</a>
-    </div>
-
-    <div class="stats-row">
-      <div class="stat-pill active">All ({{ totalCount }})</div>
-      <div class="stat-pill">In Progress ({{ inProgressCount }})</div>
-      <div class="stat-pill">Approved ({{ approvedCount }})</div>
-      <div class="stat-pill">Rejected ({{ rejectedCount }})</div>
-      <div class="stat-pill">Draft ({{ draftCount}})</div>
-    </div>
-
-    <div class="table-card">
-      {% if applications.results.entities.size > 0 %}
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>Application ID</th>
-              <th>License Type</th>
-              <th>Status</th>
-              <th>Submitted On</th>
-              <th>Last Updated</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for app in applications.results.entities %}
-            {% assign statusLabel = app.lpi_applicationstatus.label | default: 'Unknown' %}
-            {% assign statusClass = 'status-default' %}
-
-            {% if app.lpi_applicationstatus.value != 365820009 and app.lpi_applicationstatus.value != 365820010  %}
-              {% assign statusClass = 'status-inprogress' %}
-            {% endif %}
-            {% if app.lpi_applicationstatus.value == 365820010 %}
-              {% assign statusClass = 'status-approved' %}
-            {% endif %}
-            {% if app.lpi_applicationstatus.value == 365820009 %}
-              {% assign statusClass = 'status-rejected' %}
-            {% endif %}
-
-            <tr>
-              <td>
-                <div class="application-id">{{ app.lpi_name }}</div>
-              </td>
-              <td>
-                <div class="license-type">{{ app['LT.lpi_licensename'].label }}</div>
-              </td>
-              <td>
-                <span class="status-badge {{ statusClass }}">{{ statusLabel }}</span>
-              </td>
-              <td>
-                <div class="date-text">
-                  {% if app.lpi_submissiondate %}
-                    {{ app.lpi_submissiondate | date: "MMM dd, yyyy" }}
-                  {% else %}
-                    -
-                  {% endif %}
-                </div>
-              </td>
-              <td>
-                <div class="date-text">
-                  {% if app.modifiedon %}
-                    {{ app.modifiedon | date: "MMM dd, yyyy" }}
-                  {% else %}
-                    -
-                  {% endif %}
-                </div>
-              </td>
-              <td>
-                <div class="action-links">
-                  {% if app.statuscode.value == 1 %}
-                    <a class="action-link" onclick="openApplication('{{ app.lpi_applicationid }}','{{ app.lpi_functionalflow.id }}')"><i class="fa fa-edit" style="margin-right: 5px;"></i></a>
-                    <a class="action-link discard" onclick="discardApplication('{{ app.lpi_applicationid }}')"><i class="fa fa-trash" style="margin-right: 5px;"></i></a>
-                  {% else %}
-                    <a class="action-link" onclick="openApplication('{{ app.lpi_applicationid }}','{{ app.lpi_functionalflow.id }}')""><i class="fa fa-eye" style="margin-right:5px"></i></a>
-                  {% endif %}
-                </div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <div class="empty-state">No applications found</div>
+      {% if searchText != '' %}
+        <condition attribute="lpiname" operator="like" value="%{{ searchText }}%" />
       {% endif %}
-    </div>
 
-    <div class="table-footer">
-      <div class="entries-text">
-        Showing
-        {% if totalCount > 0 %}
-          {{ currentPage | minus: 1 | times: pageSize | plus: 1 }}
-        {% else %}
-          0
-        {% endif %}
-        to
-        {% assign endCount = currentPage | times: pageSize %}
-        {% if endCount > totalCount %}
-          {{ totalCount }}
-        {% else %}
-          {{ endCount }}
-        {% endif %}
-        of {{ totalCount }} entries
-      </div>
+      {% if selectedStatus == 'draft' %}
+        <condition attribute="statecode" operator="eq" value="1" />
+      {% elsif selectedStatus == 'approved' %}
+        <condition attribute="lpiapplicationstatus" operator="eq" value="365820010" />
+      {% elsif selectedStatus == 'rejected' %}
+        <condition attribute="lpiapplicationstatus" operator="eq" value="365820009" />
+      {% elsif selectedStatus == 'inprogress' %}
+        <condition attribute="statuscode" operator="eq" value="855890001" />
+        <condition attribute="lpiapplicationstatus" operator="ne" value="365820009" />
+        <condition attribute="lpiapplicationstatus" operator="ne" value="365820010" />
+      {% endif %}
+    </filter>
 
-      <div class="pagination">
-        {% if currentPage > 1 %}
-          <a class="page-link" href="?page={{ prevPage }}&search={{ searchText | url_escape }}">‹</a>
-        {% else %}
-          <span class="page-link">‹</span>
-        {% endif %}
+    <link-entity name="lpilicensetype" from="lpilicensetypeid" to="lpilicensetype" alias="LT" link-type="outer">
+      <attribute name="lpilicensename" />
+    </link-entity>
+  </entity>
+</fetch>
+{% endfetchxml %}
 
-        <span class="page-current">{{ currentPage }}</span>
+{% assign filteredTotalCount = applications.results.totalrecordcount | default: 0 %}
 
-        {% if applications.results.more_records %}
-          <a class="page-link" href="?page={{ nextPage }}&search={{ searchText | url_escape }}">›</a>
-        {% else %}
-          <span class="page-link">›</span>
-        {% endif %}
-      </div>
-    </div>
-  </div>
+<h1>Applications</h1>
+<p>Track and manage all your license applications.</p>
+
+<form method="get">
+  <input type="text" name="search" value="{{ searchText }}" placeholder="Search applications" />
+  <input type="hidden" name="status" value="{{ selectedStatus }}" />
+  <button type="submit">Search</button>
+</form>
+
+<a href="/apply-now">New Application</a>
+
+<div class="status-filters">
+  <a href="?status=all&search={{ searchText }}"
+     class="{% if selectedStatus == 'all' %}active{% endif %}">
+    All ({{ totalCount }})
+  </a>
+
+  <a href="?status=inprogress&search={{ searchText }}"
+     class="{% if selectedStatus == 'inprogress' %}active{% endif %}">
+    In Progress ({{ inProgressCount }})
+  </a>
+
+  <a href="?status=approved&search={{ searchText }}"
+     class="{% if selectedStatus == 'approved' %}active{% endif %}">
+    Approved ({{ approvedCount }})
+  </a>
+
+  <a href="?status=rejected&search={{ searchText }}"
+     class="{% if selectedStatus == 'rejected' %}active{% endif %}">
+    Rejected ({{ rejectedCount }})
+  </a>
+
+  <a href="?status=draft&search={{ searchText }}"
+     class="{% if selectedStatus == 'draft' %}active{% endif %}">
+    Draft ({{ draftCount }})
+  </a>
 </div>
+
+{% if applications.results.entities.size > 0 %}
+  <table>
+    <thead>
+      <tr>
+        <th>Application ID</th>
+        <th>License Type</th>
+        <th>Status</th>
+        <th>Submitted On</th>
+        <th>Last Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for app in applications.results.entities %}
+        {% assign statusLabel = app.lpiapplicationstatus.label | default: 'Unknown' %}
+        {% assign statusClass = 'status-default' %}
+
+        {% if app.lpiapplicationstatus.value != 365820009 and app.lpiapplicationstatus.value != 365820010 %}
+          {% assign statusClass = 'status-inprogress' %}
+        {% endif %}
+        {% if app.lpiapplicationstatus.value == 365820010 %}
+          {% assign statusClass = 'status-approved' %}
+        {% endif %}
+        {% if app.lpiapplicationstatus.value == 365820009 %}
+          {% assign statusClass = 'status-rejected' %}
+        {% endif %}
+        {% if app.statecode == 1 %}
+          {% assign statusLabel = 'Draft' %}
+          {% assign statusClass = 'status-draft' %}
+        {% endif %}
+
+        <tr>
+          <td>{{ app.lpiname }}</td>
+          <td>{{ app['LT.lpilicensename'].label }}</td>
+          <td><span class="{{ statusClass }}">{{ statusLabel }}</span></td>
+          <td>
+            {% if app.lpisubmissiondate %}
+              {{ app.lpisubmissiondate | date: "MMM dd, yyyy" }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>
+            {% if app.modifiedon %}
+              {{ app.modifiedon | date: "MMM dd, yyyy" }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p>No applications found</p>
+{% endif %}
+
+<p>
+  Showing
+  {% if filteredTotalCount > 0 %}
+    {{ currentPage | minus: 1 | times: pageSize | plus: 1 }}
+  {% else %}
+    0
+  {% endif %}
+  to
+  {% assign endCount = currentPage | times: pageSize %}
+  {% if endCount > filteredTotalCount %}
+    {{ filteredTotalCount }}
+  {% else %}
+    {{ endCount }}
+  {% endif %}
+  of {{ filteredTotalCount }} entries
+</p>
+
+<div class="pagination">
+  {% if currentPage > 1 %}
+    <a href="?page={{ prevPage }}&status={{ selectedStatus }}&search={{ searchText }}">&lt;</a>
+  {% else %}
+    <span>&lt;</span>
+  {% endif %}
+
+  <span>{{ currentPage }}</span>
+
+  {% if applications.results.morerecords %}
+    <a href="?page={{ nextPage }}&status={{ selectedStatus }}&search={{ searchText }}">&gt;</a>
+  {% else %}
+    <span>&gt;</span>
+  {% endif %}
+</div>
+`
+
+Important fixes in your original code
+
+There are a few bugs in what you pasted:
+
+Draft count assignment is wrong
+
+You had:
+
+`liquid
+{% assign draftCount = inProgressCount | plus: 1 %}
+`
+
+It should be:
+
+`liquid
+{% assign draftCount = draftCount | plus: 1 %}
+`
+
+Otherwise draft count uses the wrong variable.
+
+endfi is a typo
+
+You wrote:
+
+`liquid
+{% endfi %}
+`
+
+It must be:
+
+`liquid
+{% endif %}
+`
+
+Table row loop placement was broken
+
+In your code, the {% for app in applications.results.entities %} loop was effectively closed before the table rows were rendered. That means app would not be available correctly where you're printing columns.
+
+The fixed version renders the <tr> inside the loop.
+
+Last updated field looks broken
+
+You had:
+
+`liquid
+{% if app.m %} {{ app.m | date: "MMM dd, yyyy" }} {% else %} - {% endif %}
+`
+
+That should almost certainly be:
+
+`liquid
+{% if app.modifiedon %} {{ app.modifiedon | date: "MMM dd, yyyy" }} {% else %} - {% endif %}
+`
+
+All count vs filtered count
+
+Use:
+
+• totalCount for the top All badge
+• filteredTotalCount for the current table result count and pagination
+
+That prevents the footer from showing the wrong numbers after filtering.
+
+CSS for active status button
+
+Add something like this:
+
+`css
+.status-filters {
+  display: flex;
+  gap: 12px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.status-filters a {
+  padding: 8px 14px;
+  border: 1px solid #d0d7de;
+  border-radius: 20px;
+  text-decoration: none;
+  color: #333;
+  background: #fff;
+}
+
+.status-filters a.active {
+  background: #0d6efd;
+  color: #fff;
+  border-color: #0d6efd;
+  font-weight: 600;
+}
+`
+
+How it works
+
+When the user clicks:
+
+`text
+?status=approved
+`
+
+the page reloads, selectedStatus becomes approved, and:
+
+• the approved button gets class active
+• the FetchXML adds:
+  `xml
+  <condition attribute="lpi_applicationstatus" operator="eq" value="365820010" />
+  `
+• only approved applications are shown
+
+Same logic applies for rejected, draft, and in-progress.
+
+Best practice
+
+If you want the counters to always show totals across all applications, keep the two-query approach exactly like above:
+
+• Query 1 = all records for counters
+• Query 2 = filtered records for table
+
+If you use only one query, your counts will also change when a filter is selected, which usually is not what users expect.
+
+A logical next step would be to also make the status cards/buttons preserve the current page as 1` when switching filters, which avoids landing on an empty page after changing status.
