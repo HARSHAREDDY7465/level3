@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#2f7df6">
+  <title>Applications | Licensing Portal</title>
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="assets/fonts/font-usage.css">
+  <link rel="stylesheet" href="assets/css/portal.css">
+</head>
+<body class="lp-body">
+<a class="lp-skip-link" href="#main-content">Skip to main content</a>
+<header class="lp-navbar">
+  <nav class="navbar navbar-expand-lg">
+    <div class="container-fluid lp-container">
+      <a class="navbar-brand lp-brand" href="dashboard.html" aria-label="Licensing Portal dashboard"><span class="lp-logo"><img src="assets/icons/shield.svg" alt="" aria-hidden="true"></span>
+<span><span class="lp-brand-title">Licensing Portal</span><span class="lp-brand-subtitle">Government of Utopia</span></span></a>
+      <button class="navbar-toggler lp-navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#appNavbar" aria-controls="appNavbar" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="appNavbar">
+        <ul class="navbar-nav mx-auto mb-2 mb-lg-0 align-items-lg-center"><li class="nav-item"><a class="nav-link " href="dashboard.html">Dashboard</a></li>
+<li class="nav-item"><a class="nav-link active" href="applications.html">Applications</a></li>
+<li class="nav-item"><a class="nav-link " href="licenses.html">Licenses</a></li>
+<li class="nav-item"><a class="nav-link " href="todos.html">To-Dos</a></li>
+<li class="nav-item"><a class="nav-link " href="service-requests.html">Service Requests</a></li></ul>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <a class="lp-icon-button" href="chat.html" aria-label="Open AI assistant"><img src="assets/icons/chat-ai.svg" alt=""></a>
+          <button class="lp-icon-button" type="button" aria-label="Notifications"><img src="assets/icons/bell.svg" alt=""></button>
+          <div class="dropdown">
+            <button class="btn d-flex align-items-center gap-2 px-2" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+              <span class="lp-avatar">JD</span><span class="d-none d-sm-inline fw-bold">John Doe</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="profile.html">Profile</a></li>
+              <li><a class="dropdown-item" href="chat.html">AI Assistant</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="login.html">Sign out</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+</header>
+<main id="main-content" class="lp-main">
+<section class="lp-page"><div class="container-fluid lp-container">
+<div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-4"><div><h1 class="lp-page-title">Applications</h1><p class="lp-page-subtitle">Track and manage all your license applications.</p></div><div class="lp-toolbar"><div class="input-group lp-search"><span class="input-group-text"><img src="assets/icons/search.svg" alt=""></span><input class="form-control" type="search" placeholder="Search applications..."></div><a href="#" class="btn lp-btn-primary">New Application</a></div></div>
+<ul class="nav lp-tabs" role="tablist"><li class="nav-item"><a class="nav-link active" href="#">All (6)</a></li><li class="nav-item"><a class="nav-link" href="#">In Progress (3)</a></li><li class="nav-item"><a class="nav-link" href="#">Approved (2)</a></li><li class="nav-item"><a class="nav-link" href="#">Rejected (1)</a></li></ul>
+<div class="lp-card"><div class="lp-card-pad"><div class="table-responsive lp-table-stack"><table class="table lp-table"><thead><tr><th scope="col">Application ID</th><th scope="col">License Type</th><th scope="col">Status</th><th scope="col">Submitted On</th><th scope="col">Last Updated</th><th scope="col">Action</th></tr></thead><tbody><tr><td data-label="Application ID">APP-2024-1043</td><td data-label="License Type">Shop & Establishment</td><td data-label="Status"><span class="lp-badge lp-badge-info">In Progress</span></td><td data-label="Submitted On">May 08, 2024</td><td data-label="Last Updated">May 12, 2024</td><td data-label="Action"><a class="btn btn-link p-0" href="#">View</a></td></tr><tr><td data-label="Application ID">APP-2024-0990</td><td data-label="License Type">Food License</td><td data-label="Status"><span class="lp-badge lp-badge-success">Approved</span></td><td data-label="Submitted On">Apr 28, 2024</td><td data-label="Last Updated">May 05, 2024</td><td data-label="Action"><a class="btn btn-link p-0" href="#">View</a></td></tr><tr><td data-label="Application ID">APP-2024-0742</td><td data-label="License Type">Event License</td><td data-label="Status"><span class="lp-badge lp-badge-danger">Rejected</span></td><td data-label="Submitted On">Apr 02, 2024</td><td data-label="Last Updated">Apr 05, 2024</td><td data-label="Action"><a class="btn btn-link p-0" href="#">View</a></td></tr></tbody></table></div><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 pt-3"><span class="text-muted small">Showing 1 to 3 of 6 entries</span><nav aria-label="Widget pagination"><ul class="pagination pagination-sm lp-pagination"><li class="page-item"><a class="page-link" href="#" aria-label="Previous">&lsaquo;</a></li><li class="page-item active"><a class="page-link" href="#">1</a></li><li class="page-item "><a class="page-link" href="#">2</a></li><li class="page-item "><a class="page-link" href="#">3</a></li><li class="page-item"><a class="page-link" href="#" aria-label="Next">&rsaquo;</a></li></ul></nav></div></div></div>
+</div></section>
+</main>
+<footer class="lp-footer" id="contact">
+  <div class="lp-footer-top">
+    <div class="container-fluid lp-container">
+      <div class="row g-4">
+        <div class="col-md-4 col-lg-3">
+          <a class="lp-brand mb-3" href="index.html"><span class="lp-logo"><img src="assets/icons/shield.svg" alt="" aria-hidden="true"></span>
+<span><span class="lp-brand-title">Licensing Portal</span><span class="lp-brand-subtitle">Government of Utopia</span></span></a>
+          <p class="mb-0">A unified platform to apply, manage, track, and renew licenses and permits with ease.</p>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+          <h3>Quick Links</h3>
+          <ul><li><a href="index.html">Home</a></li><li><a href="applications.html">Services</a></li><li><a href="index.html#how-it-works">How It Works</a></li><li><a href="index.html#resources">Resources</a></li></ul>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+          <h3>Help &amp; Support</h3>
+          <ul><li><a href="chat.html">FAQs</a></li><li><a href="chat.html">User Guide</a></li><li><a href="service-requests.html">Support Center</a></li><li><a href="#">Terms &amp; Conditions</a></li></ul>
+        </div>
+        <div class="col-md-6 col-lg-2">
+          <h3>Connect With Us</h3>
+          <div class="lp-socials" aria-label="Social links"><a class="lp-social" href="#" aria-label="Twitter">X</a><a class="lp-social" href="#" aria-label="Facebook">f</a><a class="lp-social" href="#" aria-label="LinkedIn">in</a><a class="lp-social" href="#" aria-label="Email">@</a></div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <h3>Address</h3>
+          <p class="mb-1">123 Main Street, Springfield, USA</p>
+          <p class="mb-1">support@utopia.gov</p>
+          <p class="mb-0">+1 800 123 4567</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="lp-footer-bottom">
+    <div class="container-fluid lp-container d-flex flex-wrap justify-content-between gap-2">
+      <span>&copy; 2026 Government of Utopia. All rights reserved.</span>
+      <span><a href="#">Privacy Policy</a> <span aria-hidden="true">|</span> <a href="#">Terms &amp; Conditions</a></span>
+    </div>
+  </div>
+</footer>
+<script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+<script src="assets/js/portal.js"></script>
+</body>
+</html>
