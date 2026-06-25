@@ -1,142 +1,526 @@
+<style>
+  :root {
+    --primary: #1f4fa3;
+    --primary-dark: #163d80;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --success-bg: #e8f7ee;
+    --success-text: #1f8f4e;
+    --warning-bg: #fff4db;
+    --warning-text: #b7791f;
+    --danger-bg: #fdeaea;
+    --danger-text: #c0392b;
+    --shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+    --radius: 14px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .page-wrapper {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 32px 24px 48px;
+  }
+
+  .content-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    padding: 28px;
+  }
+
+  .page-header {
+    margin-bottom: 24px;
+  }
+
+  .page-header h1 {
+    margin: 0 0 8px;
+    font-size: 32px;
+    line-height: 1.2;
+    font-weight: 700;
+    color: #111827;
+  }
+
+  .page-header p {
+    margin: 0;
+    font-size: 15px;
+    color: var(--muted);
+  }
+
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+
+  .search-form {
+    flex: 1 1 360px;
+    max-width: 460px;
+    position: relative;
+  }
+
+  .search-form input[type="text"] {
+    width: 100%;
+    height: 46px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0 16px;
+    font-size: 14px;
+    color: var(--text);
+    background: #fff;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .search-form input[type="text"]:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(31, 79, 163, 0.10);
+  }
+
+  .search-form input[type="text"]::placeholder {
+    color: #9ca3af;
+  }
+
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--primary);
+    color: #fff !important;
+    text-decoration: none;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .btn-primary:hover {
+    background: var(--primary-dark);
+  }
+
+  .stats-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+
+  .stat-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: #f3f4f6;
+    color: #374151;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .stat-pill.active {
+    background: #e8eefb;
+    color: var(--primary);
+  }
+
+  .table-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .table-responsive {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 980px;
+  }
+
+  thead th {
+    text-align: left;
+    font-size: 13px;
+    font-weight: 700;
+    color: #374151;
+    background: #f9fafb;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tbody td {
+    padding: 18px;
+    font-size: 14px;
+    color: #111827;
+    border-bottom: 1px solid #f0f2f5;
+    vertical-align: middle;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .application-id {
+    font-weight: 700;
+    color: #111827;
+  }
+
+  .license-type {
+    color: #374151;
+    font-weight: 500;
+  }
+
+  .date-text {
+    color: #4b5563;
+    font-size: 14px;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .status-inprogress,
+  .status-draft,
+  .status-submitted,
+  .status-pending {
+    background: var(--warning-bg);
+    color: var(--warning-text);
+  }
+
+  .status-approved,
+  .status-active,
+  .status-completed {
+    background: var(--success-bg);
+    color: var(--success-text);
+  }
+
+  .status-rejected,
+  .status-discarded,
+  .status-cancelled,
+  .status-expired {
+    background: var(--danger-bg);
+    color: var(--danger-text);
+  }
+
+  .status-default {
+    background: #eef2f7;
+    color: #475569;
+  }
+
+  .action-links {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .action-link {
+    color: var(--primary);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .action-link:hover {
+    text-decoration: underline;
+  }
+
+  .action-link.discard {
+    color: #b42318;
+  }
+
+  .table-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 4px 0;
+    flex-wrap: wrap;
+  }
+
+  .entries-text {
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .pagination {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .page-link,
+  .page-current {
+    min-width: 36px;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: #374151;
+  }
+
+  .page-link:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+
+  .page-current {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+  }
+
+  .empty-state {
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 15px;
+  }
+
+  @media (max-width: 768px) {
+    .page-wrapper {
+      padding: 20px 14px 36px;
+    }
+
+    .content-card {
+      padding: 20px;
+    }
+
+    .page-header h1 {
+      font-size: 26px;
+    }
+
+    .toolbar {
+      align-items: stretch;
+    }
+
+    .search-form {
+      max-width: 100%;
+    }
+  }
+</style>
+
 {% assign contactId = user.id %}
 {% assign currentPage = request.params['page'] | default: 1 | integer %}
 {% assign pageSize = 5 %}
 {% assign searchText = request.params['search'] | default: '' %}
 {% assign prevPage = currentPage | minus: 1 | string %}
 {% assign nextPage = currentPage | plus: 1 | string %}
+
 {% fetchxml applications %}
-<fetch version="1.0" mapping="logical" page="{{ currentPage }}" count="{{ pageSize }}">
-    <entity name="lpi_application">
-        <attribute name="lpi_applicationid" />
-        <attribute name="lpi_contact" />
-        <attribute name="lpi_functionalflow" />
-        <attribute name="lpi_name" />
-        <attribute name="statecode" />
-        <attribute name="statuscode" />
-        <attribute name="lpi_submissiondate" />
-        <order attribute="lpi_name" descending="true" />
-        <filter type="and">
-            <condition attribute="lpi_contact" operator="eq" value="{{ contactId }}" />
-            {% if searchText != '' %}
-            <condition attribute="lpi_name" operator="like" value="%{{ searchText }}%" />
-            {% endif %}
-        </filter>
-        <link-entity name="lpi_functionalflow1" from="lpi_functionalflow1id" to="lpi_functionalflow" alias="FF">
-            <link-entity name="lpi_licensetype1" from="lpi_licensetype1id" to="lpi_licensetypeid" alias="LT">
-                <attribute name="lpi_boardname" />
-                <attribute name="lpi_licensename" />
-            </link-entity>
-        </link-entity>
-    </entity>
+<fetch version="1.0" output-format="xml-platform" mapping="logical" distinct="false" count="{{ pageSize }}" page="{{ currentPage }}">
+  <entity name="lpi_application">
+    <attribute name="lpi_applicationid" />
+    <attribute name="lpi_name" />
+    <attribute name="statuscode" />
+    <attribute name="createdon" />
+    <attribute name="modifiedon" />
+    <attribute name="lpi_submissiondate" />
+    <attribute name="lpi_licenseid" />
+    <order attribute="createdon" descending="true" />
+    <filter type="and">
+      <condition attribute="lpi_contactid" operator="eq" value="{{ contactId }}" />
+      {% if searchText != '' %}
+      <condition attribute="lpi_name" operator="like" value="%{{ searchText }}%" />
+      {% endif %}
+    </filter>
+    <link-entity name="lpi_license" from="lpi_licenseid" to="lpi_licenseid" link-type="outer" alias="LT">
+      <attribute name="lpi_licensename" />
+    </link-entity>
+  </entity>
 </fetch>
 {% endfetchxml %}
-<div class="container mt-3">
-    <div class="card border-0 bg-transparent mb-3">
-        
-        <div class="d-flex align-items-center mb-3">
-            <div class="flex-grow-1 flex-basis-0" style="width: 130px;"></div>
-            
-            <div class="text-center flex-grow-1">
-                <h4 class="fw-semibold text-dark m-0">My Applications</h4> 
-            </div>
-            
-            <div class="flex-grow-1 flex-basis-0 text-end" style="width: 130px;">
-                <button id="applyBtn" class="btn text-white border-0 rounded-2 px-3 py-2 shadow-sm" style="background-color: rgb(0, 94, 184); cursor: pointer;">
-                    <i class="fa fa-paper-plane me-2"></i>Apply Now
-                </button> 
-            </div>
-        </div>
-  
-        <form method="get" id="searchForm">
-            <input type="text" id="applicationSearch" name="search" class="form-control form-control-sm" placeholder="Search by Application Name" value="{{ searchText }}" />
-        </form>
+
+{% assign totalCount = applications.results.total_record_count | default: 0 %}
+{% assign inProgressCount = 0 %}
+{% assign approvedCount = 0 %}
+{% assign rejectedCount = 0 %}
+
+{% for app in applications.results.entities %}
+  {% if app.statuscode.label == 'In Progress' or app.statuscode.label == 'Draft' or app.statuscode.label == 'Submitted' or app.statuscode.label == 'Pending' %}
+    {% assign inProgressCount = inProgressCount | plus: 1 %}
+  {% endif %}
+  {% if app.statuscode.label == 'Approved' or app.statuscode.label == 'Active' or app.statuscode.label == 'Completed' %}
+    {% assign approvedCount = approvedCount | plus: 1 %}
+  {% endif %}
+  {% if app.statuscode.label == 'Rejected' or app.statuscode.label == 'Discarded' or app.statuscode.label == 'Cancelled' or app.statuscode.label == 'Expired' %}
+    {% assign rejectedCount = rejectedCount | plus: 1 %}
+  {% endif %}
+{% endfor %}
+
+<div class="page-wrapper">
+  <div class="content-card">
+    <div class="page-header">
+      <h1>Applications</h1>
+      <p>Track and manage all your license applications.</p>
     </div>
-    {% for app in applications.results.entities %}
-    <div class="card app-card mb-3"
-     data-app-name="{{ app.lpi_name | downcase }}"
-     data-license-name="{{ app['LT.lpi_licensename'].label | downcase }}">
-    <div class="card-body">
-        <div class="app-row">
-            <!-- Application Name -->
-            <div class="app-col-name">
-                {{ app.lpi_name }}
-            </div>
-            
-            <!-- License Name -->
-            <div class="app-col-license">
-                {{ app['LT.lpi_licensename'].label }}
-            </div>
-            
-            <!-- Submitted Date (conditional) -->
-            <div class="app-col-date">
-                {% if app.statuscode.value != 1 %}
-                    <div><strong>Submitted On:</strong></div>
-                    {% if app.lpi_submissiondate %}
-                    <time id="submittion_date" datetime="{{ app.lpi_submissiondate | date_to_iso8601}}"></time>
-                    {% endif %}
-                {% else %}
-                    <!-- invisible placeholder keeps spacing consistent -->
-                    <div style="visibility:hidden;"><strong>Submitted On:</strong></div>
-                    <div style="visibility:hidden;">&nbsp;</div>
-                {% endif %}
-            </div>
-            
-            <!-- Status Badge -->
-            <div class="app-col-status">
-                <span class="badge rounded-pill bg-light text-primary border px-3 py-2">
-                    {{ app.statuscode.label }}
-                </span>
-            </div>
-            
-            <!-- Buttons -->
-            <div class="app-col-actions">
-                {% if app.statuscode.value == 1 %}
-                <button class="btn btn-primary btn-sm action-btn edit-btn"
-                    onclick="openApplication('{{ app.lpi_applicationid }}','{{ app.lpi_functionalflow.id }}')"><i class="fa fa-edit" style="margin-right: 5px;"></i>
-                    Edit
-                </button>
-                <button class="btn btn-outline-danger btn-sm action-btn"
-                    onclick="discardApplication('{{ app.lpi_applicationid }}')"><i class="fa fa-trash" style="margin-right: 5px;"></i>
-                    Discard
-                </button>
-                {% else %}
-                <button class="btn btn-primary btn-sm action-btn view-btn"
-                    onclick="openApplication('{{ app.lpi_applicationid }}','{{ app.lpi_functionalflow.id }}')"><i class="fa fa-eye" style="margin-right:5px"></i>
-                    View
-                </button>
-                {% endif %}
-            </div>
-        </div>
+
+    <div class="toolbar">
+      <form method="get" class="search-form">
+        <input
+          type="text"
+          name="search"
+          value="{{ searchText }}"
+          placeholder="Search applications..." />
+      </form>
+
+      <a href="/apply-now" class="btn-primary">New Application</a>
     </div>
-</div>
-    {% endfor %}
-    {% if applications.results.entities.size == 0 %}
-    <div class="text-center text-muted mt-4">
-        No applications found
+
+    <div class="stats-row">
+      <div class="stat-pill active">All ({{ totalCount }})</div>
+      <div class="stat-pill">In Progress ({{ inProgressCount }})</div>
+      <div class="stat-pill">Approved ({{ approvedCount }})</div>
+      <div class="stat-pill">Rejected ({{ rejectedCount }})</div>
     </div>
-    {% endif %}
-    <!-- Pagination -->
-    <div class="d-flex justify-content-between align-items-center mt-4 mb-3">
-        <div>
-            {% if currentPage > 1 %}
-            <a class="btn btn-outline-secondary btn-sm"
-                 href="?page={{ prevPage }}&search={{ searchText | url_escape }}">
-             <i class="fa fa-arrow-left" style="margin-left: 5px";></i>   Previous
-            </a>
+
+    <div class="table-card">
+      {% if applications.results.entities.size > 0 %}
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Application ID</th>
+              <th>License Type</th>
+              <th>Status</th>
+              <th>Submitted On</th>
+              <th>Last Updated</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for app in applications.results.entities %}
+            {% assign statusLabel = app.statuscode.label | default: 'Unknown' %}
+            {% assign statusClass = 'status-default' %}
+
+            {% if statusLabel == 'In Progress' or statusLabel == 'Draft' or statusLabel == 'Submitted' or statusLabel == 'Pending' %}
+              {% assign statusClass = 'status-inprogress' %}
             {% endif %}
-        </div>
-        <div>
-            <span class="small text-muted">
-                Page {{ currentPage }}
-            </span>
-        </div>
-        <div>
-            {% if applications.results.more_records %}
-            <a class="btn btn-outline-primary btn-sm"
-                href="?page={{ nextPage }}&search={{ searchText | url_escape }}">
-                Next <i class="fa fa-arrow-right" style="margin-right: 5px";></i>
-            </a>
+            {% if statusLabel == 'Approved' or statusLabel == 'Active' or statusLabel == 'Completed' %}
+              {% assign statusClass = 'status-approved' %}
             {% endif %}
-        </div>
+            {% if statusLabel == 'Rejected' or statusLabel == 'Discarded' or statusLabel == 'Cancelled' or statusLabel == 'Expired' %}
+              {% assign statusClass = 'status-rejected' %}
+            {% endif %}
+
+            <tr>
+              <td>
+                <div class="application-id">{{ app.lpi_name }}</div>
+              </td>
+              <td>
+                <div class="license-type">{{ app['LT.lpi_licensename'].label }}</div>
+              </td>
+              <td>
+                <span class="status-badge {{ statusClass }}">{{ statusLabel }}</span>
+              </td>
+              <td>
+                <div class="date-text">
+                  {% if app.lpi_submissiondate %}
+                    {{ app.lpi_submissiondate | date: "MMM dd, yyyy" }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </div>
+              </td>
+              <td>
+                <div class="date-text">
+                  {% if app.modifiedon %}
+                    {{ app.modifiedon | date: "MMM dd, yyyy" }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </div>
+              </td>
+              <td>
+                <div class="action-links">
+                  {% if app.statuscode.value == 1 %}
+                    <a class="action-link" href="/edit-application?id={{ app.lpi_applicationid }}">Edit</a>
+                    <a class="action-link discard" href="/discard-application?id={{ app.lpi_applicationid }}">Discard</a>
+                  {% else %}
+                    <a class="action-link" href="/view-application?id={{ app.lpi_applicationid }}">View</a>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">No applications found</div>
+      {% endif %}
     </div>
+
+    <div class="table-footer">
+      <div class="entries-text">
+        Showing
+        {% if totalCount > 0 %}
+          {{ currentPage | minus: 1 | times: pageSize | plus: 1 }}
+        {% else %}
+          0
+        {% endif %}
+        to
+        {% assign endCount = currentPage | times: pageSize %}
+        {% if endCount > totalCount %}
+          {{ totalCount }}
+        {% else %}
+          {{ endCount }}
+        {% endif %}
+        of {{ totalCount }} entries
+      </div>
+
+      <div class="pagination">
+        {% if currentPage > 1 %}
+          <a class="page-link" href="?page={{ prevPage }}&search={{ searchText | url_escape }}">‹</a>
+        {% else %}
+          <span class="page-link">‹</span>
+        {% endif %}
+
+        <span class="page-current">{{ currentPage }}</span>
+
+        {% if applications.results.more_records %}
+          <a class="page-link" href="?page={{ nextPage }}&search={{ searchText | url_escape }}">›</a>
+        {% else %}
+          <span class="page-link">›</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
 </div>
