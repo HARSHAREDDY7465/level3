@@ -1,0 +1,3453 @@
+document.addEventListener("DOMContentLoaded", async function () {
+  let currentStepIndex = 0;
+  const steps = document.querySelectorAll(".step");
+  const container = document.getElementById("questionContainer");
+  const sectionTitle = document.getElementById("sectionTitle");
+  const flowId = document.getElementById("flowMeta").dataset.flowid;
+  const statuscode = document.getElementById("flowMeta").dataset.applicationstatuscode;
+  const loader = document.getElementById("loader");
+  const nextBtn = document.getElementById("nextBtn");
+  const backBtn = document.getElementById("backBtn");
+  const submitBtn = document.getElementById("submitBtn");
+  const summaryBtn = document.getElementById("summaryBtn");
+  const applicationTitle = document.title;
+  const contactId = document.getElementById("contactId").value;
+  const urlParams = new URLSearchParams(window.location.search);
+  const applicationId = urlParams.get("applicationid"); // Edit
+  const isEditMode = !!applicationId; // Edit
+  const isReadOnly = isEditMode && statuscode != 1; //Submitted
+  const pageMode = isReadOnly ? "read" : isEditMode ? "edit" : "create";
+  document.addEventListener("input", function () {
+    if (!isReadOnly) {
+      hasDraftChanges = true;
+    }
+  });
+  document.body.setAttribute("data-mode", pageMode);
+  if (isReadOnly) {
+    document.getElementById("body-question-container").classList.add("read-mode");
+  }
+  let sectionId = null;
+  let hasDraftChanges = false;
+  let isSummaryView = false;
+  const questionsCache = new Map();// to cache already rendered question
+  const questionsMetaStore = new Map();
+  const answersStore = new Map();// to store answer
+  const fileAnnotationsMap = new Map(); // Map to track annotation IDs for files
+  let submissionId = applicationId || null;
+  if (isEditMode) {
+    await loadExistingApplication();
+  }
+  if (steps.length) {
+  await activateStep(steps[currentStepIndex]);
+  steps.forEach((step, index) => {
+    step.style.cursor = "pointer";
+    step.addEventListener("click", async function () {
+      await goToStep(index);
+    });
+  });
+  }
+  // store question in cache and avoid api calls
+  function cacheKey(sectionId) {
+    return `${flowId}:${sectionId}`;
+  }
+  // show loader
+  function setLoading(isLoading) {
+    loader.classList.toggle("d-none", !isLoading);
+    updateButtons();
+  }
+  // Button Accessibility
+function updateButtons() {
+  const isFirst = currentStepIndex === 0;
+  const isLast = currentStepIndex === steps.length - 1;
+  backBtn.disabled = isFirst || isSummaryView || isReadOnly;
+  nextBtn.disabled = isLast || isSummaryView || isReadOnly;
+  submitBtn.disabled = !isLast;
+  summaryBtn.disabled = !isLast;
+  if (isReadOnly) {
+    submitBtn.disabled = true;
+    summaryBtn.disabled = false;
+    document.getElementById("printFormApplicationBtn").style.display = "block";
+  } else {
+    document.getElementById("printFormApplicationBtn").style.display = "none";
+  }
+}
+  // activate steps
+  async function activateStep(step) {
+    const currentIndex = [...steps].indexOf(step);
+    steps.forEach((s, index) => {
+      const circle = s.querySelector(".circle");
+      if (index <= currentIndex) {
+        s.classList.add("active");
+        if (circle) circle.classList.add("active");
+      } else {
+        s.classList.remove("active");
+        if (circle) circle.classList.remove("active");
+      }
+    });
+    sectionId = step.dataset.section;
+    const title = step.dataset.title;
+    sectionTitle.innerText = title || "";
+    const key = cacheKey(sectionId);
+    if (questionsCache.has(key)) {
+      setLoading(false);
+      renderQuestions(questionsCache.get(key));
+      return;
+    }
+    updateButtons();
+    await loadQuestions(sectionId, flowId);
+  }
+  // load the questions using portal api
+  async function loadQuestions(sectionId, flowId) {
+    container.innerHTML = "";
+    try {
+      setLoading(true);
+      const result = await fetch(
+        `get-portal-data?flowId=${flowId}&sectionId=${sectionId}`
+      );
+      const response = await result.text();
+      const data = JSON.parse(response.trim());
+      questionsCache.set(cacheKey(sectionId), data.value);
+      renderQuestions(data.value);
+    } catch (e) {
+      container.innerHTML = `<div class="alert alert-danger">Failed to load questions.</div>`;
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }
+  // render the question based on the subsection on UI
+  function renderQuestions(items) {
+  container.innerHTML = "";
+  const renderedFileQuestionIds = [];
+  const renderedMultipleFileQuestionIds = [];
+  const grouped = {};
+
+  items.forEach((item) => {
+    const subsection = item["HSS.lpi_subsectiontitle"];
+
+    console.log("Question Item:", {
+      questionid: item["QF.lpi_questionframework1id"],
+      answerdatatype: item["QF.lpi_answerdatatype"],
+      lookupentityname: item["QF.lpi_lookupentityname"],
+      lookupdisplayfields: item["QF.lpi_lookupdisplayfields"]
+    });
+
+    const question = {
+      questionid: item["QF.lpi_questionframework1id"],
+      body: item["QF.lpi_questionbody"],
+      answerdatatype: item["QF.lpi_answerdatatype"],
+      allowedfiletype: item["QF.lpi_allowedfiletypes"],
+      picklistOptions: item["QF.lpi_optionsforpicklist"],
+      isrequired: item["QF.lpi_required"],
+      checkboxOptions: item["QF.lpi_optionforcheckboxgroup"],
+      hasError: item["QF.lpi_haserror"],
+      errorMessage: item["QF.lpi_errormessage"],
+      tableConfig: item["QF.lpi_tableschema"],
+      lookupEntityName: item["QF.lpi_lookupentityname"],
+      lookupDisplayFields: item["QF.lpi_lookupdisplayfields"]
+    };
+
+    questionsMetaStore.set(question.questionid, {
+      hasError: question.hasError,
+      errorMessage: question.errorMessage,
+      isRequired: question.isrequired,
+      minCharacters: item["QF.lpi_minnumberofcharacters"],
+      maxCharacters: item["QF.lpi_maxnumberofcharacters"],
+      minNumber: item["QF.lpi_minnumber"],
+      maxNumber: item["QF.lpi_maxnumber"],
+      lookupentityname: question.lookupEntityName,
+      lookupdisplayfields: question.lookupDisplayFields,
+      dataType: question.answerdatatype
+    });
+
+		if (!grouped[subsection]) grouped[subsection] = [];
+		grouped[subsection].push(question);
+	  });
+
+	  Object.keys(grouped).forEach((subsection) => {
+		const questionsHtml = grouped[subsection]
+		  .map((q) => {
+			if (q.answerdatatype === "File") {
+			  renderedFileQuestionIds.push(q.questionid);
+			}
+        if (q.answerdatatype === "Multiple Files") {
+          renderedMultipleFileQuestionIds.push(q.questionid);
+        }
+
+        return `
+          <div class="mb-3 question-block" data-question-block-id="${q.questionid}" data-required="${q.isrequired}">
+            <label class="form-label">
+              ${q.body} ${q.isrequired ? '<span class="text-danger">*</span>' : ""}
+            </label>
+            ${generateInputField(q)}
+            <div class="text-danger small d-none" data-error-for="${q.questionid}"></div>
+          </div>
+        `;
+      })
+      .join("");
+
+    container.innerHTML += `
+      <div class="subsection-card mb-4 p-3 border rounded">
+        <h4 class="mt-3">${subsection}</h4>
+        ${questionsHtml}
+      </div>`;
+  });
+
+  renderedFileQuestionIds.forEach((id) =>
+    bindFilePreviewWithAttachmentSupport(id, container)
+  );
+
+  renderedMultipleFileQuestionIds.forEach((id) =>
+    bindMultipleFilesAttachmentSupport(id, container)
+  );
+
+  populateLookupDropdowns();
+  attachCheckboxListeners();
+  restoreAnswers();
+
+  const textInputs = container.querySelectorAll(
+    'input[data-datatype="Text"], textarea[data-datatype="TextArea"]'
+  );
+
+  textInputs.forEach((input) => {
+    const questionId = input.dataset.questionid;
+    const meta = questionsMetaStore.get(questionId) || {};
+    const countEl = container.querySelector(`#char-count-${questionId}`);
+    const errorEl = container.querySelector(`[data-error-for="${questionId}"]`);
+
+    const updateCharCount = () => {
+      const charCount = input.value.length;
+      const minChars = meta.minCharacters;
+      const maxChars = meta.maxCharacters;
+
+      let countText = `${charCount} characters`;
+      if (maxChars) countText += ` / ${maxChars} max`;
+      if (countEl) countEl.textContent = countText;
+
+      if (input.value.length > 0) {
+        const validation = validateCharacterCount(
+          input.value,
+          minChars,
+          maxChars,
+          meta
+        );
+
+        if (errorEl) {
+          if (!validation.isValid) {
+            errorEl.textContent = validation.message;
+            errorEl.classList.remove("d-none");
+            errorEl.classList.add("text-danger");
+            errorEl.classList.remove("text-warning");
+          } else {
+            errorEl.textContent = "";
+            errorEl.classList.add("d-none");
+          }
+        }
+      } else if (errorEl) {
+        errorEl.textContent = "";
+        errorEl.classList.add("d-none");
+      }
+    };
+
+    input.addEventListener("input", updateCharCount);
+    updateCharCount();
+  });
+
+    // Add real-time validation for Number and Decimal fields
+    const numberInputs = container.querySelectorAll(
+      'input[data-datatype="Number"], input[data-datatype="Decimal"]'
+    );
+
+    numberInputs.forEach((input) => {
+      const questionId = input.dataset.questionid;
+      const meta = questionsMetaStore.get(questionId) || {};
+      const errorEl = container.querySelector(`[data-error-for="${questionId}"]`);
+
+      const updateNumberValidation = () => {
+        // Only validate if field has content
+        if (input.value.length > 0) {
+          const validation = validateNumberRange(
+            input.value,
+            meta.minNumber,
+            meta.maxNumber,
+            meta
+          );
+
+          if (errorEl) {
+            if (!validation.isValid) {
+              errorEl.textContent = validation.message;
+              errorEl.classList.remove("d-none");
+              errorEl.classList.add("text-danger"); // RED for validation errors
+              errorEl.classList.remove("text-warning");
+            } else {
+              errorEl.textContent = "";
+              errorEl.classList.add("d-none");
+              errorEl.classList.remove("text-danger", "text-warning");
+            }
+          }
+        } else {
+          // Clear error if field becomes empty
+          if (errorEl) {
+            errorEl.textContent = "";
+            errorEl.classList.add("d-none");
+            errorEl.classList.remove("text-danger", "text-warning");
+          }
+        }
+      };
+
+      input.addEventListener("input", updateNumberValidation);
+      input.addEventListener("blur", updateNumberValidation);
+      input.addEventListener("change", updateNumberValidation);
+    });
+    const emailInputs = container.querySelectorAll(
+      'input[data-datatype="Email"]'
+    );
+
+    emailInputs.forEach((input) => {
+      const questionId = input.dataset.questionid;
+      const errorEl = container.querySelector(
+        `[data-error-for="${questionId}"]`
+      );
+
+      const validateEmailInput = () => {
+        const result = validateEmail(input.value);
+
+        if (!result.isValid) {
+          errorEl.textContent = result.message;
+          errorEl.classList.remove("d-none");
+        } else {
+          errorEl.textContent = "";
+          errorEl.classList.add("d-none");
+        }
+      };
+
+      input.addEventListener("input", validateEmailInput);
+      input.addEventListener("blur", validateEmailInput);
+    });
+
+    const urlInputs = container.querySelectorAll(
+      'input[data-datatype="URL"]'
+    );
+
+    urlInputs.forEach((input) => {
+      const questionId = input.dataset.questionid;
+      const errorEl = container.querySelector(
+        `[data-error-for="${questionId}"]`
+      );
+
+      const validateUrlInput = () => {
+        const result = validateUrl(input.value);
+
+        if (!result.isValid) {
+          errorEl.textContent = result.message;
+          errorEl.classList.remove("d-none");
+        } else {
+          errorEl.textContent = "";
+          errorEl.classList.add("d-none");
+        }
+      };
+
+      input.addEventListener("input", validateUrlInput);
+      input.addEventListener("blur", validateUrlInput);
+    });
+
+
+    if (isReadOnly) {
+      container
+        .querySelectorAll(
+          "input,textarea,select,button.add-row,button.remove-row"
+        )
+        .forEach((element) => {
+          element.disabled = true;
+        });
+    }
+  }
+  // Document-level event delegation for delete file buttons
+  document.addEventListener("click", function (e) {
+    // Check if the clicked element is a delete file button
+    const deleteBtn = e.target.closest("[id^='file-delete-btn-']");
+    if (!deleteBtn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Extract questionId from button ID
+    const questionId = deleteBtn.id.replace("file-delete-btn-", "");
+
+    console.log("Delete button clicked for questionId:", questionId);
+
+    // Get all relevant elements
+    const input = container.querySelector(
+      `input[type="file"][data-questionid="${questionId}"]`
+    );
+    const textEl = container.querySelector(`#file-preview-text-${questionId}`);
+    const previewBtn = container.querySelector(`#file-preview-btn-${questionId}`);
+
+    if (!input || !textEl || !previewBtn) {
+      console.log("Required elements not found");
+      return;
+    }
+
+    // Check if there's a newly selected file
+    const hasNewFile = input.files && input.files.length > 0;
+    const answerData = answersStore.get(questionId);
+    const existingFileData = answerData?.fileData || null;
+
+    console.log("State:", { hasNewFile, hasExistingFile: !!existingFileData, isEditMode, isReadOnly });
+
+    if (hasNewFile) {
+      // Delete newly selected file (works in CREATE or EDIT mode)
+      if (!confirm("Delete this attachment? This action cannot be undone.")) return;
+
+      console.log("Deleting newly selected file");
+      input.value = "";
+
+      // Update answersStore
+      const currentData = answersStore.get(questionId);
+      if (currentData) {
+        answersStore.set(questionId, {
+          ...currentData,
+          fileData: null,
+          isNewFile: false,
+          answerValue: "",
+        });
+      }
+
+      // Update UI
+      if (existingFileData) {
+        textEl.textContent = `Current: ${existingFileData.fileName}`;
+        previewBtn.classList.remove("d-none");
+        if (!isReadOnly) {
+          deleteBtn.classList.remove("d-none");
+        }
+      } else {
+        textEl.textContent = "No file selected";
+        previewBtn.classList.add("d-none");
+        deleteBtn.classList.add("d-none");
+      }
+
+      // Close modal if open
+      const modalEl = document.getElementById("filePreviewModal");
+      if (modalEl) {
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) modalInstance.hide();
+      }
+    } else if (existingFileData) {
+      // Existing file from database
+      if (isReadOnly) {
+        console.log("Cannot delete - application is read-only");
+        return;
+      }
+
+      // Confirm deletion
+      if (!confirm("Delete this attachment? This action cannot be undone.")) return;
+
+      // In CREATE mode: User is trying to delete a file they created in this session (from answersStore)
+      // In EDIT mode: User is trying to delete a file from the database
+
+      console.log("Deleting existing file");
+
+      // Update answersStore
+      const currentData = answersStore.get(questionId);
+      answersStore.set(questionId, {
+        ...currentData,
+        fileData: null,
+        isNewFile: false,
+        answerValue: "",
+      });
+
+      // Mark annotation for deletion (only relevant in edit mode)
+      if (isEditMode) {
+        const existingAnnotationId = fileAnnotationsMap.get(questionId);
+        if (existingAnnotationId && existingAnnotationId !== "DELETE") {
+          fileAnnotationsMap.set(questionId, existingAnnotationId);
+        }
+      }
+
+      // Update UI
+      textEl.textContent = "No file selected";
+      previewBtn.classList.add("d-none");
+      deleteBtn.classList.add("d-none");
+
+      // Close modal if open
+      const modalEl = document.getElementById("filePreviewModal");
+      if (modalEl) {
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) modalInstance.hide();
+      }
+    } else {
+      console.log("Delete action not allowed - no file to delete");
+    }
+  });
+  // Function to generate input field HTML based on answer data type
+  function generateInputField(question) {
+    const questionId = question.questionid;
+    const dataType = question.answerdatatype;
+    const picklistOptions = question.picklistOptions;
+    const checkboxOptions = question.checkboxOptions;
+    /* Melky Code Start */
+    const lookupEntityName = question.lookupEntityName;
+    const lookupDisplayFields = question.lookupDisplayFields;
+    /* Melky Code End */
+    switch (dataType) {
+      case "Text":
+        return `<div>
+          <input type="text" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}" />
+        </div>`;
+      case "TextArea":
+        return `<div>
+          <textarea class="form-control" rows="4" data-questionid="${questionId}" data-datatype="${dataType}"></textarea>
+        </div>`;
+      case "Number":
+        return `<input type="number" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}" />`;
+      case "Decimal":
+        return `<input type="number" step="0.01" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}" />`;
+      case "Email":
+        return `<input type="email" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}" />`;
+      case "Telephone":
+        return `<input type="tel" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}" />`;
+      case "URL":
+        return `<input type="url" class="form-control" data-questionid="${questionId}" placeholder="https://example.com" data-datatype="${dataType}" />`;
+      case "Date":
+        return `<input type="date" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}" />`;
+      case "Time":
+        return `<input type="time" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}" />`;
+      case "Datetime":
+        return `<input type="datetime-local" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}"/>`;
+      case "Range":
+        return `
+          <div class="d-flex align-items-center gap-3">
+            <input type="range" class="form-range flex-grow-1" min="0" max="100" data-questionid="${questionId}" data-datatype="${dataType}" />
+            <span class="badge bg-secondary" id="range-value-${questionId}">50</span>
+          </div>`;
+      case "Checkbox":
+        return `
+    <div>
+      <div class="form-check form-check-inline">
+        <input type="checkbox" class="form-check-input" data-group="${questionId}" value="yes" data-datatype="${dataType}" />
+        <label class="form-check-label">Yes</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input type="checkbox" class="form-check-input" data-group="${questionId}" value="no" data-datatype="${dataType}" />
+        <label class="form-check-label">No</label>
+      </div>
+    </div>`;
+      case "CheckboxGroup": {
+        const optionsList = (question.checkboxOptions || "")
+          .split(",")
+          .map((opt) => opt.trim())
+          .filter(Boolean);
+        return `
+    <div>
+      ${optionsList
+            .map(
+              (opt, index) => `
+        <div class="form-check">
+          <input
+            type="checkbox"
+            class="form-check-input"
+            id="${questionId}_${index}"
+            data-group="${questionId}"
+            value="${opt}"
+            data-datatype="${dataType}" />
+          <label class="form-check-label" for="${questionId}_${index}">${opt}</label>
+        </div>
+      `).join("")}
+    </div>`;
+      }
+      case "Radio":
+        return `
+          <div>
+            <div class="form-check">
+              <input type="radio" class="form-check-input" data-group="${questionId}" value="option1" data-datatype="${dataType}" />
+              <label class="form-check-label">Option 1</label>
+            </div>
+            <div class="form-check">
+              <input type="radio" class="form-check-input" data-group="${questionId}" value="option2" data-datatype="${dataType}"  />
+              <label class="form-check-label">Option 2</label>
+            </div>
+            <div class="form-check">
+              <input type="radio" class="form-check-input" data-group="${questionId}" value="option3"  data-datatype="${dataType}"/>
+              <label class="form-check-label">Option 3</label>
+            </div>
+          </div>`;
+      case "Picklist":
+        let options = `<option value="" data-datatype="${dataType}">-- Select an option --</option>`;
+        if (picklistOptions) {
+          const optionsList = picklistOptions
+            .split(",")
+            .map((opt) => opt.trim());
+          options += optionsList
+            .map(
+              (opt) =>
+                `<option value="${opt}" data-datatype="${dataType}">${opt}</option>`
+            ).join("");
+        }
+        return `
+    <select class="form-select" data-questionid="${questionId}" data-datatype="${dataType}">
+      ${options}
+    </select>`;
+      /* Melky Code start */
+      // Lookup rendering (replace the old Lookup case)
+case "Lookup": {
+  const entityName = lookupEntityName || "";
+  const displayFields = lookupDisplayFields || "";
+
+  if (!entityName) {
+    return `<div class="alert alert-warning"><small>Lookup configuration missing. Entity name not specified.</small></div>`;
+  }
+
+  // Input group: search input + button, and a results container
+  return `
+    <div class="lookup-wrapper">
+      <div class="input-group">
+        <input
+          type="text"
+          class="form-control lookup-search-input"
+          data-questionid="${questionId}"
+          data-datatype="${dataType}"
+          data-lookup-entity="${entityName}"
+          data-lookup-fields="${displayFields}"
+          placeholder="Search..."
+          autocomplete="off"
+        />
+        <button type="button" class="btn btn-outline-secondary lookup-search-btn" data-questionid="${questionId}">🔍</button>
+      </div>
+      <ul class="list-group lookup-results mt-2" id="lookup-results-${questionId}" style="max-height:300px; overflow:auto;"></ul>
+    </div>
+  `;
+}
+      /* Melky Code Ends */
+      case "Table":
+        return renderTableQuestion(question);
+      // Code Generated by Sidekick is for learning and experimentation purposes only.
+// filename: form-upload-generate-input-field.js
+case "File": {
+  const acceptValue = getFileAcceptValue(question.allowedfiletype);
+
+  return `
+    <div>
+      <input
+        type="file"
+        class="form-control"
+        data-questionid="${questionId}"
+        data-datatype="${dataType}"
+        ${acceptValue ? `accept="${acceptValue}"` : ""}
+      />
+      <div class="small text-muted mt-2" id="file-preview-text-${questionId}">No file selected</div>
+      <div class="d-flex gap-2 mt-2">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-primary d-none"
+          id="file-preview-btn-${questionId}">
+          Preview file
+        </button>
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-danger d-none"
+          id="file-delete-btn-${questionId}">
+          Delete file
+        </button>
+      </div>
+    </div>`;
+}
+
+case "Multiple Files": {
+  const acceptValue = getFileAcceptValue(question.allowedfiletype);
+
+  return `
+    <div>
+      <input
+        type="file"
+        class="form-control"
+        data-questionid="${questionId}"
+        data-datatype="${dataType}"
+        multiple="multiple"
+        ${acceptValue ? `accept="${acceptValue}"` : ""}
+      />
+      <div class="small text-muted mt-2" id="file-preview-text-${questionId}">No file selected</div>
+
+      <div id="file-table-wrapper-${questionId}" class="table-responsive mt-2 d-none">
+        <table class="table table-sm table-bordered align-middle mb-0">
+			<thead class="table-light">
+			  <tr>
+				<th class="text-start" style="width:40px;">#</th>
+				<th class="text-start">File name</th>
+				<th class="text-start" style="width:100px;">Size</th>
+				<th class="text-middle" style="width:225px;">Actions</th>
+			  </tr>
+			</thead>
+          <tbody id="file-table-body-${questionId}"></tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+      case "HTML":
+      default:
+        return "";
+    }
+  }
+  // Melky Code : Lookup Dropdown
+  // Melky Code : Lookup Dropdown - FIXED VERSION
+  // Melky Code : Lookup Dropdown - FIXED VERSION 2
+  // New lookup search initialization + live search
+async function populateLookupDropdowns() {
+  const inputs = container.querySelectorAll(".lookup-search-input");
+
+  function debounce(fn, wait) {
+    let t;
+    return function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
+  }
+
+  function escapeODataString(s) {
+    if (s == null) return "";
+    return String(s).replace(/'/g, "''");
+  }
+
+  for (const input of inputs) {
+    const questionId = input.getAttribute("data-questionid");
+    const entityName = input.getAttribute("data-lookup-entity");
+    const displayFieldsStr = input.getAttribute("data-lookup-fields") || "";
+    const resultsList = document.getElementById(`lookup-results-${questionId}`);
+
+    if (!entityName || !displayFieldsStr) {
+      console.warn(`Lookup config missing for question ${questionId}`);
+      continue;
+    }
+
+    const displayFields = displayFieldsStr.split(",").map(f => f.trim()).filter(Boolean);
+    const entityNameLower = entityName.toLowerCase();
+    const entityNameSingular = entityNameLower.endsWith('s') ? entityNameLower.slice(0, -1) : entityNameLower;
+    const idField = `${entityNameSingular}id`;
+    const selectFields = [idField, ...displayFields].join(",");
+
+    // small helper to render an array of records into the results list
+    function renderResults(records) {
+      resultsList.innerHTML = "";
+      if (!records || records.length === 0) {
+        const li = document.createElement("li");
+        li.className = "list-group-item small text-muted";
+        li.textContent = "No records found";
+        resultsList.appendChild(li);
+        return;
+      }
+      for (const rec of records) {
+        // build displayObj and displayText
+        const displayObj = {};
+        for (const f of displayFields) {
+          displayObj[f] = rec[f] !== undefined && rec[f] !== null ? String(rec[f]) : "";
+        }
+        const displayText = displayFields.map(f => displayObj[f]).filter(Boolean).join(", ");
+        const li = document.createElement("li");
+        li.className = "list-group-item list-group-item-action";
+        li.tabIndex = 0;
+        li.textContent = displayText;
+        li.dataset.recordId = rec[idField];
+        li.dataset.display = JSON.stringify(displayObj);
+        // clicking a result selects it: set input value & metadata, then clear results
+        li.addEventListener("click", function () {
+          input.value = displayText;
+          input.dataset.display = this.dataset.display;
+          input.dataset.selectedId = this.dataset.recordId;
+          // mark change for drafts
+          hasDraftChanges = true;
+          // Clear results (collapse)
+          resultsList.innerHTML = "";
+        });
+        // keyboard support: Enter selects
+        li.addEventListener("keydown", function (ev) {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            this.click();
+          }
+        });
+        resultsList.appendChild(li);
+      }
+    }
+
+    // search function that calls the web API and returns up to 10 records
+    const performSearch = debounce(async (term) => {
+      try {
+        // show loading placeholder
+        resultsList.innerHTML = `<li class="list-group-item small text-muted">Searching...</li>`;
+        const token = await getRequestVerificationToken();
+        const top = 10;
+        let apiUrl = `/_api/${entityNameLower}?$select=${encodeURIComponent(selectFields)}&$top=${top}`;
+
+        const trimmed = (term || "").trim();
+        if (trimmed.length > 0 && displayFields.length > 0) {
+          // build OData $filter using contains on each display field joined with or
+          const q = displayFields.map(f => `contains(${f},'${escapeODataString(trimmed)}')`).join(" or ");
+          apiUrl += `&$filter=${encodeURIComponent(q)}`;
+        }
+
+        const res = await fetch(apiUrl, {
+          headers: {
+            "Accept": "application/json",
+            "__RequestVerificationToken": token
+          }
+        });
+
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          console.error("Lookup search failed", res.status, txt);
+          resultsList.innerHTML = `<li class="list-group-item small text-muted">Search failed</li>`;
+          return;
+        }
+
+        const data = await res.json();
+        const records = Array.isArray(data.value) ? data.value : [];
+        renderResults(records.slice(0, 10));
+      } catch (err) {
+        console.error("Lookup search error", err);
+        resultsList.innerHTML = `<li class="list-group-item small text-muted">Error</li>`;
+      }
+    }, 250);
+
+    // initial load: show first 10 records
+    performSearch("");
+
+    // wire input typing -> live search
+    input.addEventListener("input", function (ev) {
+      // when typing, remove any previously selectedId/display (user is changing)
+      delete input.dataset.selectedId;
+      // trigger search
+      performSearch(this.value);
+    });
+
+    // wire search button
+    const btn = input.parentNode.querySelector(".lookup-search-btn");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        // run immediate search (no debounce)
+        performSearch.cancel && performSearch.cancel(); // if available
+        // call underlying search logic directly (non-debounced)
+        (async function immediate() {
+          try {
+            resultsList.innerHTML = `<li class="list-group-item small text-muted">Searching...</li>`;
+            const token = await getRequestVerificationToken();
+            const top = 10;
+            const trimmed = (input.value || "").trim();
+            let apiUrl = `/_api/${entityNameLower}?$select=${encodeURIComponent(selectFields)}&$top=${top}`;
+            if (trimmed.length > 0 && displayFields.length > 0) {
+              const q = displayFields.map(f => `contains(${f},'${escapeODataString(trimmed)}')`).join(" or ");
+              apiUrl += `&$filter=${encodeURIComponent(q)}`;
+            }
+            const res = await fetch(apiUrl, {
+              headers: { "Accept": "application/json", "__RequestVerificationToken": token }
+            });
+            if (!res.ok) {
+              resultsList.innerHTML = `<li class="list-group-item small text-muted">Search failed</li>`;
+              return;
+            }
+            const data = await res.json();
+            const records = Array.isArray(data.value) ? data.value : [];
+            renderResults(records.slice(0, 10));
+          } catch (err) {
+            console.error(err);
+            resultsList.innerHTML = `<li class="list-group-item small text-muted">Error</li>`;
+          }
+        })();
+      });
+    }
+
+    // Close results when clicking outside
+    document.addEventListener("click", function (ev) {
+      if (!input.contains(ev.target) && !resultsList.contains(ev.target)) {
+        // collapse results
+        resultsList.innerHTML = "";
+      }
+    });
+
+    // If there is an existing saved answer, set input value (restoreAnswers will handle full restore).
+    const saved = answersStore.get(questionId);
+    if (saved && saved.answerValue) {
+      input.value = saved.answerValue;
+      // If you previously had dataset info for this saved item, we won't be able to reattach it here.
+      // It's okay: collectAnswers will fall back to using input.value when dataset.display is missing.
+    }
+  }
+}
+  // Melky code end
+  // table functionality
+  function renderTableQuestion(q) {
+    // const parsed = JSON.parse(q.tableConfig || '{"columns":[]}');
+    const columns = q.tableConfig.columns || [];
+    const tbodyId = `tbody-${q.questionid}`;
+    const headerHtml = columns
+      .map((c) => `<th>${c.label || c.key || ""}</th>`)
+      .join("");
+    const rowsHtml = Array.from({ length: 2 }, (_, i) =>
+      renderTableRow(q.questionid, columns, i)
+    ).join("");
+    return `
+    <div class="table-question">
+      <div class="table-responsive">
+        <table class="table table-bordered align-middle">
+          <thead><tr>${headerHtml}</tr></thead>
+          <tbody id="${tbodyId}">${rowsHtml}</tbody>
+        </table>
+      </div>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-outline-primary add-row" data-qid="${q.questionid}">
+          Add Row
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-danger remove-row" data-qid="${q.questionid}">
+          Remove Row
+        </button>
+      </div>
+    </div>
+  `;
+  }
+  function renderTableRow(questionId, columns, rowIndex) {
+    return `
+    <tr data-rowindex="${rowIndex}">
+      ${columns
+        .map((col) => `<td>${renderTableCell(questionId, rowIndex, col)}</td>`)
+        .join("")}
+    </tr>
+  `;
+  }
+  function renderTableCell(questionId, rowIndex, col, childId = "") {
+    const attrs = `class="form-control"
+    data-questionid="${questionId}"
+    data-datatype="Table"
+    data-rowindex="${rowIndex}"
+    data-columnkey="${col.key || ""}"
+     data-childid="${childId}"`;
+    switch (col.type) {
+      case "Date":
+        return `<input style="font-size: 14px;" type="date"  ${attrs}>`;
+      case "Number":
+        return `<input style="font-size: 14px;" type="number" ${attrs}>`;
+      case "Decimal":
+        return `<input style="font-size: 14px;" type="number" step="0.01" ${attrs}>`;
+      case "Picklist": {
+        let options = `<option value="">-- Select an option --</option>`;
+        if (col.options) {
+          const optionMarkup = col.options
+            .split(",")
+            .map((opt) => opt.trim());
+          options += optionMarkup
+            .map(
+              (opt) =>
+                `<option value="${opt}">${opt}</option>`
+            ).join("");
+        }
+        return `<select style="font-size: 14px;" ${attrs}>
+        ${options}
+      </select>`;
+      }
+      default:
+        return `<input style="font-size: 14px;" type="text" ${attrs}>`;
+    }
+
+  }
+  document.addEventListener("click", (e) => {
+    const removeBtn = e.target.closest(".remove-row");
+    if (removeBtn) {
+      const qid = removeBtn.dataset.qid;
+      const tbody = document.getElementById(`tbody-${qid}`);
+      if (!tbody) return;
+      const row = tbody.rows[tbody.rows.length - 1];
+      const inputs = row.querySelectorAll(
+        `[data-questionid="${qid}"][data-datatype="Table"]`
+      );
+      for (const input of inputs) {
+        const key =
+          `${qid}_${input.dataset.rowindex}_${input.dataset.columnkey}`;
+        const existing = answersStore.get(key);
+        if (existing?.answerId) {
+          existing.isDeleted = true;
+          answersStore.set(key, existing);
+        } else {
+          answersStore.delete(key);
+        }
+      }
+      tbody.deleteRow(tbody.rows.length - 1);
+      return;
+    }
+    const btn = e.target.closest(".add-row");
+    if (!btn) return;
+    const qid = btn.dataset.qid;
+    const tbody = document.getElementById(`tbody-${qid}`);
+    if (!tbody) return;
+    const key = cacheKey(sectionId);
+    if (questionsCache.has(key)) {
+      const items = questionsCache.get(key) || [];
+      const item = items.find(
+        (x) => String(x["QF.lpi_questionframework1id"]) === String(qid)
+      );
+      if (!item) return;
+      const tableConfig = item["QF.lpi_tableschema"];
+      const columns = (tableConfig || '{"columns":[]}').columns || [];
+      tbody.insertAdjacentHTML(
+        "beforeend",
+        renderTableRow(qid, columns, tbody.rows.length)
+      );
+    }
+  });
+  // table functionality
+  function getFileAcceptValue(fileType) {
+    const fileCategory = fileType;
+    switch (fileCategory) {
+      case "Images":
+        return "image/*";
+      case "Audio":
+        return "audio/*";
+      case "Video":
+        return "video/*";
+      case "PDF":
+        return ".pdf,application/pdf";
+      case "Document (Microsoft Office)":
+        return ".doc,.docx,.xls,.xlsx,.ppt,.pptx";
+      case "All":
+      default:
+        return "";
+    }
+  }
+  function attachCheckboxListeners() {
+    // Get all checkboxes with data-group attribute
+    const checkboxes = container.querySelectorAll(
+      'input[type="checkbox"][data-group]'
+    );
+    checkboxes.forEach((checkbox) => {
+      checkbox.addEventListener("change", function () {
+        if (this.checked) {
+          const group = this.getAttribute("data-group");
+          const dataType = this.getAttribute("data-datatype");
+          if (dataType === "Checkbox") {
+            // Uncheck all other checkboxes in the same group
+            const otherCheckboxes = container.querySelectorAll(
+              `input[type="checkbox"][data-group="${group}"]`
+            );
+            otherCheckboxes.forEach((other) => {
+              if (other !== this) {
+                other.checked = false;
+              }
+            });
+          }
+        }
+      });
+    });
+  }
+  // Collect answers from all inputs in the current step
+  async function collectAnswers() {
+    const inputs = container.querySelectorAll(
+      "[data-questionid], [data-group]"
+    );
+    const handledQuestions = new Set();
+    const fileUploadPromises = [];
+
+    inputs.forEach((input) => {
+      const questionId = input.dataset.questionid || input.dataset.group;
+      const dataType = input.dataset.datatype;
+      if (!questionId || handledQuestions.has(questionId)) return;
+      let answerValue = null;
+      // Melky
+      // Handle Lookup type
+      // Handle Lookup type
+if (dataType === "Lookup") {
+  // the lookup is rendered as an <input> with data-lookup-fields and possibly dataset.display
+  const inputEl = input; // the same input element in the inputs NodeList
+  const meta = questionsMetaStore.get(questionId) || {};
+  const displayFieldsArr = (meta.lookupdisplayfields || "")
+    .split(",")
+    .map(f => f.trim())
+    .filter(Boolean);
+
+  let displayValue = "";
+
+  // If the user selected from the results, the input will have dataset.display (JSON)
+  if (inputEl && inputEl.dataset && inputEl.dataset.display) {
+    try {
+      const displayObj = JSON.parse(inputEl.dataset.display || "{}");
+      if (displayFieldsArr.length) {
+        const parts = displayFieldsArr
+          .map(f => {
+            // prefer exact logical name, fallback to case-insensitive match
+            if (displayObj[f] !== undefined && displayObj[f] !== null && String(displayObj[f]).trim() !== "") {
+              return String(displayObj[f]).trim();
+            }
+            const key = Object.keys(displayObj).find(k => k.toLowerCase() === f.toLowerCase());
+            return key ? String(displayObj[key]).trim() : "";
+          })
+          .filter(Boolean);
+        if (parts.length) {
+          displayValue = parts.join(", ");
+        } else {
+          // fallback to the textual input value
+          displayValue = inputEl.value || "";
+        }
+      } else {
+        // no configured fields; fallback to input text
+        displayValue = inputEl.value || "";
+      }
+    } catch (e) {
+      displayValue = inputEl.value || "";
+    }
+  } else {
+    // No dataset available (user typed or fallback): use typed value
+    displayValue = (inputEl && inputEl.value) ? inputEl.value.trim() : "";
+  }
+
+  handledQuestions.add(questionId);
+
+  if (displayValue) {
+    const existingAnswer = answersStore.get(questionId);
+    answersStore.set(questionId, {
+      questionId,
+      dataType,
+      answerId: existingAnswer?.answerId || null,
+      answerValue: displayValue,
+      originalValue: existingAnswer?.originalValue || displayValue,
+      // store selected id if present
+      selectedId: inputEl?.dataset?.selectedId || null
+    });
+  } else {
+    // no value -> remove
+    answersStore.delete(questionId);
+  }
+  return;
+}
+      // Melky
+      if (dataType === "Table") {
+        const tableInputs = container.querySelectorAll(
+          `[data-questionid="${questionId}"][data-datatype="Table"]`
+        );
+        tableInputs.forEach((input) => {
+          const value = (input.value || "").trim();
+          if (!value) return;
+          const key = `${questionId}_${input.dataset.rowindex}_${input.dataset.columnkey}`;
+          const existing = answersStore.get(key) || {};
+          answersStore.set(key, {
+            questionId,
+            answerId: existing.answerId || null,
+            dataType,
+            rowNumber: Number(input.dataset.rowindex),
+            columnName: input.dataset.columnkey,
+            answerValue: value,
+            originalValue: existing.originalValue,
+          });
+        });
+        handledQuestions.add(questionId);
+        return;
+      }
+      switch (input.type) {
+        case "checkbox": {
+          const checkboxes = container.querySelectorAll(
+            `input[data-group="${questionId}"]:checked`
+          );
+          answerValue = Array.from(checkboxes)
+            .map((cb) => cb.value)
+            .join(",");
+          break;
+        }
+        case "radio": {
+          const selectedRadio = container.querySelector(
+            `input[data-group="${questionId}"]:checked`
+          );
+          answerValue = selectedRadio ? selectedRadio.value : null;
+          break;
+        }
+        case "file": {
+          const fileInput = input;
+          const existingAnswer = answersStore.get(questionId);
+
+          if (fileInput.files && fileInput.files.length > 0) {
+            const file = fileInput.files[0];
+            fileUploadPromises.push(
+              (async () => {
+                const base64Content = await fileToBase64(file);
+                answersStore.set(questionId, {
+                  questionId,
+                  dataType,
+                  answerId: existingAnswer?.answerId || null,
+                  answerValue: file.name,
+                  originalValue: file.name,
+                  fileData: {
+                    fileName: file.name,
+                    fileSize: file.size,
+                    fileType: file.type,
+                    base64Content: base64Content,
+                  },
+                  isNewFile: true,
+                });
+              })()
+            );
+          } else if (existingAnswer && !existingAnswer.isNewFile) {
+            // No new file selected, but there's an existing file - keep it as is
+            // Don't mark as isNewFile if nothing changed
+          }
+          handledQuestions.add(questionId);
+          return;
+        }
+        default:
+          answerValue = input.value;
+          break;
+      }
+
+      if (
+        answerValue !== "" &&
+        answerValue !== undefined &&
+        answerValue !== null
+      ) {
+        const existingAnswer = answersStore.get(questionId);
+        if (existingAnswer) {
+          answersStore.set(questionId, {
+            ...existingAnswer,
+            answerValue,
+          });
+        } else {
+          answersStore.set(questionId, {
+            questionId,
+            dataType,
+            answerId: null,
+            answerValue,
+            originalValue: answerValue,
+          });
+        }
+      }
+      handledQuestions.add(questionId);
+    });
+
+    await Promise.all(fileUploadPromises);
+    console.log("Answers collected:", answersStore);
+    console.log("Total answers:", answersStore.size);
+    return answersStore.size;
+  }
+// Convert file to Base64
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64String = reader.result.split(",")[1];
+        resolve(base64String);
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
+  }
+  // Create new application for the user
+  async function createApplication() {
+    const token = await getRequestVerificationToken();
+    const payload = {
+      "lpi_FunctionalFlow@odata.bind": `/lpi_functionalflow1s(${flowId})`,
+      "lpi_Contact@odata.bind": `/contacts(${contactId})`,
+      "lpi_applicationtitle": applicationTitle,
+      statuscode: 1,
+      "lpi_applicationstatus":365820011
+    };
+    const res = await fetch("/_api/lpi_applications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        __RequestVerificationToken: token,
+      },
+      body: JSON.stringify(payload),
+    });
+    console.log(res);
+    return res.headers.get("entityid");
+  }
+// Create File in Notes
+  async function createFileAnnotation(userResponseId, questionId, fileData) {
+    try {
+      const token = await getRequestVerificationToken();
+
+      const annotationPayload = {
+        "objectid_lpi_userresponse@odata.bind": `/lpi_userresponses(${userResponseId})`,
+        objecttypecode: "lpi_userresponse",
+        subject: `File Upload - Question ${questionId}`,
+        notetext: `File: ${fileData.fileName} (${fileData.fileSize} bytes)`,
+        filename: fileData.fileName,
+        documentbody: fileData.base64Content,
+        mimetype: fileData.fileType,
+      };
+
+      console.log("Creating annotation for userresponse:", userResponseId);
+
+      const response = await fetch("/_api/annotations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          __RequestVerificationToken: token,
+        },
+        body: JSON.stringify(annotationPayload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Annotation creation failed:", errorText);
+        return null;
+      }
+
+      let data;
+      try {
+        data = await response.json();
+        console.log("Annotation created successfully:", data.annotationid);
+        return data.annotationid;
+      } catch (parseError) {
+        console.log("Annotation created but no response body");
+        return null;
+      }
+    } catch (error) {
+      console.error("Error creating annotation:", error);
+      return null;
+    }
+  }
+// Delete File in Notes
+  async function deleteFileAnnotation(annotationId) {
+    try {
+      const token = await getRequestVerificationToken();
+
+      console.log("Deleting annotation:", annotationId);
+
+      const response = await fetch(`/_api/annotations(${annotationId})`, {
+        method: "DELETE",
+        headers: {
+          __RequestVerificationToken: token,
+          "If-Match": "*",
+        },
+      });
+
+      if (!response.ok) {
+        console.error("Annotation deletion failed:", response.status);
+        return false;
+      }
+
+      console.log("Annotation deleted successfully");
+      return true;
+    } catch (error) {
+      console.error("Error deleting annotation:", error);
+      return false;
+    }
+  }
+// Fetch Files from Notes
+  async function fetchAnnotationsForUserResponse(userResponseId) {
+    try {
+      console.log("Fetching annotations for:", userResponseId);
+      const url = `/_api/annotations?$filter=_objectid_value%20eq%20'${userResponseId}'`;
+
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+      });
+
+      if (!response.ok) {
+        console.log("No annotations found, status:", response.status);
+        return [];
+      }
+
+      const data = await response.json();
+      console.log("Annotations found:", data.value?.length || 0);
+      return data.value || [];
+    } catch (error) {
+      console.error("Error fetching annotations:", error);
+      return [];
+    }
+  }
+  // Load Existing Applications
+  async function loadExistingApplication() {
+    if (!isEditMode || !applicationId) return;
+    try {
+      setLoading(true);
+      console.log("Loading existing application data...");
+
+      const fetchXml = `<fetch><entity name="lpi_userresponse"><attribute name="lpi_answer" /><attribute name="lpi_application" /><attribute name="lpi_question" /><attribute name="lpi_userresponseid" /><attribute name="lpi_questiondatatype" /><attribute name="lpi_rownumber"/><attribute name="lpi_columnname"/><filter><condition attribute="lpi_application" operator="eq" value="${applicationId}" /></filter></entity></fetch>`;
+
+      const url = `/_api/lpi_userresponses?fetchXml=${encodeURIComponent(
+        CleanFetchForWebAPI(fetchXml)
+      )}`;
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+      });
+      const data = await response.json();
+      // Populate answersStore with existing answers
+      for (const item of data.value) {
+        const questionId = item["_lpi_question_value"];
+        const answerValue = item["lpi_answer"];
+        const answerId = item["lpi_userresponseid"];
+        const dataType = item["lpi_questiondatatype"];
+        const row = item["lpi_rownumber"];
+        const column = item["lpi_columnname"];
+        const key =
+          dataType === "Table" ? `${questionId}_${row}_${column}` : questionId;
+        let storeData = {
+          questionId,
+          answerId,
+          answerValue,
+          originalValue: answerValue,
+          dataType,
+          rowNumber: row,
+          columnName: column,
+        };
+
+        // For File type, fetch from annotations
+        if (dataType === "File" && answerId) {
+          console.log(`Loading file for question ${questionId}, response ${answerId}`);
+          const annotations = await fetchAnnotationsForUserResponse(answerId);
+
+          if (annotations.length > 0) {
+            const annotation = annotations[0];
+            storeData.fileData = {
+              fileName: annotation.filename,
+              fileSize: 0,
+              fileType: annotation.mimetype,
+              base64Content: annotation.documentbody,
+            };
+            // Store annotation ID for later updates
+            fileAnnotationsMap.set(questionId, annotation.annotationid);
+            console.log(`Loaded file from annotation: ${annotation.filename}`);
+          }
+        }
+
+        answersStore.set(key, storeData);
+      }
+
+      console.log("Loaded existing answers:", answersStore.size);
+    } catch (error) {
+      console.error("Error loading existing application:", error);
+      alert("Failed to load application data. Please try again.");
+      window.location.href = "/";
+    } finally {
+      setLoading(false);
+    }
+  }
+  // Restoring Answers for Edit/View Application
+  function restoreAnswers() {
+    // Questions currently rendered
+    const visibleQuestions = new Set(
+      Array.from(container.querySelectorAll("[data-question-block-id]")).map(
+        (el) => el.dataset.questionBlockId
+      )
+    );
+    answersStore.forEach((answer) => {
+      const { questionId, dataType, answerValue, rowNumber, columnName } =
+        answer;
+      // Skip answers not in current section
+      if (!visibleQuestions.has(String(questionId))) {
+        return;
+      }
+      //Melky
+      // restoreAnswers() — Lookup branch
+if (dataType === "Lookup") {
+  const inputEl = container.querySelector(
+    `input[data-questionid="${questionId}"][data-datatype="Lookup"]`
+  );
+  if (!inputEl) return;
+
+  if (answerValue) {
+    // Set the visible text to the saved display string
+    inputEl.value = answerValue;
+    // Clear dataset.selectedId / dataset.display because restored data only contains the text
+    delete inputEl.dataset.selectedId;
+    delete inputEl.dataset.display;
+  } else {
+    // No saved value — clear the input and any metadata
+    inputEl.value = "";
+    delete inputEl.dataset.selectedId;
+    delete inputEl.dataset.display;
+  }
+
+  return;
+}
+      //Melky
+      if (dataType === "Table") {
+        if (rowNumber == null || !columnName) {
+          return;
+        }
+        ensureTableRowCount(questionId, Number(rowNumber) + 1);
+        const input = container.querySelector(
+          `[data-questionid="${questionId}"][data-rowindex="${rowNumber}"][data-columnkey="${columnName}"]`
+        );
+        if (input) {
+          input.value = answerValue || "";
+        }
+        return;
+      }
+      if (answerValue === null || answerValue === "") {
+        return;
+      }
+      const input = container.querySelector(
+        `[data-questionid="${questionId}"]`
+      );
+      const groupInputs = container.querySelectorAll(
+        `[data-group="${questionId}"]`
+      );
+      if (input && input.type !== "file") {
+        input.value = answerValue;
+      } else if (groupInputs.length) {
+        if (groupInputs[0].type === "checkbox") {
+          const values = answerValue.split(",");
+          groupInputs.forEach((cb) => (cb.checked = values.includes(cb.value)));
+        } else {
+          groupInputs.forEach((r) => (r.checked = r.value === answerValue));
+        }
+      }
+    });
+  }
+  // Character count validation for Text/TextArea
+  function validateCharacterCount(value, minChars, maxChars, meta) {
+    const charCount = (value || "").length;
+
+    if (!minChars && !maxChars) {
+      return { isValid: true, message: "" };
+    }
+
+    const minVal = minChars ? parseInt(minChars) : 0;
+    const maxVal = maxChars ? parseInt(maxChars) : Infinity;
+
+    if (minVal > 0 && charCount < minVal) {
+      return {
+        isValid: false,
+        message: `❌ Minimum ${minChars} characters required (current: ${charCount})`,
+      };
+    }
+
+    if (maxVal > 0 && charCount > maxVal) {
+      return {
+        isValid: false,
+        message: `❌ Maximum ${maxChars} characters allowed (current: ${charCount})`,
+      };
+    }
+
+    return { isValid: true, message: "" };
+  }
+  // Number range validation for Number/Decimal fields
+  function validateNumberRange(value, minNumber, maxNumber, meta) {
+    const numValue = parseFloat(value);
+
+    if (isNaN(numValue)) {
+      return { isValid: false, message: "❌ Please enter a valid number" };
+    }
+
+    if (!minNumber && !maxNumber) {
+      return { isValid: true, message: "" };
+    }
+
+    const minVal = minNumber ? parseFloat(minNumber) : -Infinity;
+    const maxVal = maxNumber ? parseFloat(maxNumber) : Infinity;
+
+    if (minVal > -Infinity && numValue < minVal) {
+      return {
+        isValid: false,
+        message: `❌ Minimum value ${minVal} required (current: ${numValue})`,
+      };
+    }
+
+    if (maxVal < Infinity && numValue > maxVal) {
+      return {
+        isValid: false,
+        message: `❌ Maximum value ${maxVal} allowed (current: ${numValue})`,
+      };
+    }
+
+    return { isValid: true, message: "" };
+  }
+  function validateEmail(value) {
+  const emailRegex =
+    /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+  if (!value || value.trim() === "") {
+    return { isValid: true, message: "" };
+  }
+
+  return {
+    isValid: emailRegex.test(value),
+    message: emailRegex.test(value)
+      ? ""
+      : "❌ Please enter a valid email address"
+  };
+}
+function validateUrl(value) {
+  const urlRegex =
+    /^(https?:\/\/)?([\w-]+\.)+[\w-]{2,}(\/.*)?$/i;
+
+  if (!value || value.trim() === "") {
+    return { isValid: true, message: "" };
+  }
+
+  return {
+    isValid: urlRegex.test(value),
+    message: urlRegex.test(value)
+      ? ""
+      : "❌ Please enter a valid URL"
+  };
+}
+  // check for mandatory fields input
+  function validateCurrentStep() {
+    let isValid = true;
+    const questionBlocks = container.querySelectorAll(".question-block");
+
+    questionBlocks.forEach((block) => {
+      const questionId = block.dataset.questionBlockId;
+      const meta = questionsMetaStore.get(questionId) || {};
+      const isRequired = block.dataset.required === "true";
+      const errorEl = block.querySelector(`[data-error-for="${questionId}"]`);
+      const singleInput = block.querySelector("[data-questionid]");
+      const groupInputs = block.querySelectorAll("[data-group]");
+
+      // Clear previous error
+      if (errorEl) {
+        errorEl.textContent = "";
+        errorEl.classList.add("d-none");
+      }
+
+      // ===== STEP 1: CHECK IF REQUIRED =====
+      if (isRequired) {
+        let hasValue = false;
+
+        if (singleInput) {
+          hasValue = singleInput.value && singleInput.value.trim() !== "";
+        } else if (groupInputs.length > 0) {
+          hasValue = Array.from(groupInputs).some((input) => input.checked);
+        }
+
+        // Required field is EMPTY
+        if (!hasValue) {
+          isValid = false;
+          if (errorEl) {
+            errorEl.textContent =
+              meta.hasError && meta.errorMessage
+                ? meta.errorMessage
+                : "This field is required.";
+            errorEl.classList.remove("d-none");
+            errorEl.classList.add("text-danger"); // RED
+          }
+          return;
+        }
+
+        if (meta.dataType === "Email" && singleInput) {
+          const emailValidation = validateEmail(singleInput.value);
+
+          if (!emailValidation.isValid) {
+            isValid = false;
+            errorEl.textContent = emailValidation.message;
+            errorEl.classList.remove("d-none");
+            errorEl.classList.add("text-danger");
+          }
+        }
+
+        if (meta.dataType === "URL" && singleInput) {
+          const urlValidation = validateUrl(singleInput.value);
+
+          if (!urlValidation.isValid) {
+            isValid = false;
+            errorEl.textContent = urlValidation.message;
+            errorEl.classList.remove("d-none");
+            errorEl.classList.add("text-danger");
+          }
+        }
+
+        // ===== STEP 2: CHARACTER LIMITS for required text fields =====
+        if (meta.dataType === "Text" || meta.dataType === "TextArea") {
+          if (singleInput) {
+            const charValidation = validateCharacterCount(
+              singleInput.value,
+              meta.minCharacters,
+              meta.maxCharacters,
+              meta
+            );
+            if (!charValidation.isValid) {
+              isValid = false;
+              if (errorEl) {
+                errorEl.textContent = charValidation.message;
+                errorEl.classList.remove("d-none");
+                errorEl.classList.add("text-danger"); // RED
+              }
+            }
+          }
+        }
+
+        // ===== STEP 3: NUMBER RANGE for required number fields =====
+        if (meta.dataType === "Number" || meta.dataType === "Decimal") {
+          if (singleInput) {
+            const numberValidation = validateNumberRange(
+              singleInput.value,
+              meta.minNumber,
+              meta.maxNumber,
+              meta
+            );
+            if (!numberValidation.isValid) {
+              isValid = false;
+              if (errorEl) {
+                errorEl.textContent = numberValidation.message;
+                errorEl.classList.remove("d-none");
+                errorEl.classList.add("text-danger"); // RED
+              }
+            }
+          }
+        }
+      } else {
+        // ===== NON-REQUIRED FIELD =====
+        // For text fields: Only validate if user entered at least 1 character
+        if (meta.dataType === "Text" || meta.dataType === "TextArea") {
+          if (singleInput && singleInput.value.trim().length > 0) {
+            const charValidation = validateCharacterCount(
+              singleInput.value,
+              meta.minCharacters,
+              meta.maxCharacters,
+              meta
+            );
+            if (!charValidation.isValid) {
+              isValid = false;
+              if (errorEl) {
+                errorEl.textContent = charValidation.message;
+                errorEl.classList.remove("d-none");
+                errorEl.classList.add("text-danger"); // RED
+              }
+            }
+          }
+          // If 0 characters, NO ERROR - field passes
+        }
+
+        // For number fields: Only validate if user entered a value
+        if (meta.dataType === "Number" || meta.dataType === "Decimal") {
+          if (singleInput && singleInput.value.trim().length > 0) {
+            const numberValidation = validateNumberRange(
+              singleInput.value,
+              meta.minNumber,
+              meta.maxNumber,
+              meta
+            );
+            if (!numberValidation.isValid) {
+              isValid = false;
+              if (errorEl) {
+                errorEl.textContent = numberValidation.message;
+                errorEl.classList.remove("d-none");
+                errorEl.classList.add("text-danger"); // RED
+              }
+            }
+          }
+          // If empty, NO ERROR - field passes
+        }
+
+        if (meta.dataType === "Email" && singleInput) {
+          if (singleInput && singleInput.value.trim().length > 0) {
+            const emailValidation = validateEmail(singleInput.value);
+
+            if (!emailValidation.isValid) {
+              isValid = false;
+              errorEl.textContent = emailValidation.message;
+              errorEl.classList.remove("d-none");
+              errorEl.classList.add("text-danger");
+            }
+          }
+        }
+
+        if (meta.dataType === "URL" && singleInput) {
+          if (singleInput && singleInput.value.trim().length > 0) {
+            const urlValidation = validateUrl(singleInput.value);
+
+            if (!urlValidation.isValid) {
+              isValid = false;
+              errorEl.textContent = urlValidation.message;
+              errorEl.classList.remove("d-none");
+              errorEl.classList.add("text-danger");
+            }
+          }
+        }
+      }
+    });
+
+    return isValid;
+  }
+  // nextBtn functionality
+  nextBtn.addEventListener("click", async function () {
+    if (currentStepIndex < steps.length - 1) {
+      await goToStep(currentStepIndex + 1);
+    }
+  });
+  // backBtn functionality
+  backBtn.addEventListener("click", async function () {
+    collectAnswers();
+    if (currentStepIndex > 0) {
+      currentStepIndex--;
+      await activateStep(steps[currentStepIndex]);
+    }
+  });
+  // Submit Button Functionality
+  submitBtn.addEventListener("click", async function () {
+    try {
+      if (!validateCurrentStep()) return;
+      setLoading(true);
+      await collectAnswers();
+
+      if (submissionId == null && !isEditMode) {
+        submissionId = await createApplication();
+      }
+
+      await buildAnsPayload();
+      hasDraftChanges = false;
+      const token = await getRequestVerificationToken();
+
+      // Get current date and time in ISO format
+      const submissionDate = new Date().toISOString();
+
+      const updateApplicationStatus = {
+        statuscode: 855890001,
+        lpi_submissiondate: submissionDate,
+        lpi_applicationstatus: 365820001,
+      };
+
+      await fetch(`/_api/lpi_applications(${submissionId})`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          __RequestVerificationToken: token,
+        },
+        body: JSON.stringify(updateApplicationStatus),
+      });
+
+      // Fetch the application details to get lpi_name
+      const applicationDetails = await fetch(`/_api/lpi_applications(${submissionId})`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }).then(response => response.json());
+
+      const applicationNumber = applicationDetails.lpi_name;
+
+      // Show success page with animation
+      showSuccessPage(applicationNumber);
+
+    } catch (error) {
+      console.error("Error submitting application:", error);
+      alert("Failed to submit application. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  });
+  // Summary Button Functionality
+  summaryBtn.addEventListener("click", async function () {
+    try {
+      if (!isReadOnly && !validateCurrentStep()) return;
+      setLoading(true);
+      await collectAnswers();
+
+      if (submissionId == null && !isEditMode && answersStore.size > 0) {
+        submissionId = await createApplication();
+      }
+
+      if (!isReadOnly && submissionId) {
+        await buildAnsPayload();
+      }
+      await renderApplicationView("summary");
+    } catch (error) {
+      console.error("Summary failed:", error);
+      alert("Unable to load summary.");
+    } finally {
+      setLoading(false);
+    }
+  });
+  // Success page with animations
+  function showSuccessPage(applicationNumber) {
+    const successPageHTML = `
+    <div id="successPageContainer" style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      margin: 0;
+      padding: 0;
+    ">
+      <div style="
+        text-align: center;
+        color: white;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        justify-content: center;
+        padding: 20px;
+      ">
+        <!-- Animated Checkmark -->
+        <div id="checkmarkContainer" style="
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          margin-bottom: 30px;
+        ">
+          <svg id="checkmarkSVG" viewBox="0 0 52 52" style="width: 80px; height: 80px;">
+            <circle id="checkCircle" cx="26" cy="26" r="25" fill="none" stroke="white" stroke-width="2" style="opacity: 0; transform-origin: 26px 26px; transform: scale(0);"/>
+            <path id="checkPath" d="M14.1 27.2l7.1 7.2 16.7-16.8" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="stroke-dasharray: 48; stroke-dashoffset: 48;"/>
+          </svg>
+        </div>
+
+        <!-- Success Text -->
+        <h1 id="successTitle" style="
+          font-size: 32px;
+          font-weight: bold;
+          margin: 20px 0;
+          opacity: 0;
+          transform: translateY(20px);
+        ">Your Application is Submitted!</h1>
+
+        <!-- Application Number -->
+        <div id="applicationInfo" style="
+          background: rgba(255, 255, 255, 0.2);
+          padding: 20px 30px;
+          border-radius: 10px;
+          margin: 20px auto;
+          max-width: 400px;
+          opacity: 0;
+          transform: translateY(20px);
+          backdrop-filter: blur(10px);
+        ">
+          <p style="margin: 0; font-size: 14px; opacity: 0.9;">Application Number</p>
+          <p id="appNumber" style="
+            margin: 10px 0 0 0;
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 1px;
+          ">${applicationNumber}</p>
+        </div>
+
+        <!-- Subtitle -->
+        <p id="successSubtitle" style="
+          font-size: 16px;
+          margin-top: 20px;
+          opacity: 0;
+          transform: translateY(20px);
+          max-width: 500px;
+          margin-left: auto;
+          margin-right: auto;
+        ">Please save this number for your reference</p>
+
+        <!-- Redirecting text -->
+        <p id="redirectText" style="
+          font-size: 14px;
+          margin-top: 40px;
+          opacity: 0;
+        ">Redirecting to Application List in <span id="countdown">5</span>s...</p>
+
+         <!-- Button Container -->
+        <div style="
+          display: flex;
+          gap: 15px;
+          justify-content: center;
+          margin-top: 30px;
+          flex-wrap: wrap;
+        ">
+          <!-- View Applications Button -->
+          <button id="viewApplicationsBtn" style="
+            background-color: white;
+            color: #667eea;
+            border: none;
+            padding: 12px 40px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+          ">View Applications</button>
+
+          <!-- Print Application Button -->
+          <button id="printApplicationBtn" style="
+            background-color: rgba(255, 255, 255, 0.15);
+            color: white;
+            border: 2px solid white;
+            padding: 12px 40px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+          ">Print Application</button>
+
+          <!-- Back to Home Button -->
+          <button id="backToHomeBtn" style="
+            background-color: transparent;
+            color: white;
+            border: 2px solid white;
+            padding: 12px 40px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+          ">Back to Home</button>
+        </div>
+    <style>
+      @keyframes slideInCircle {
+        0% {
+          opacity: 0;
+          transform: scale(0);
+        }
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      @keyframes drawCheckmark {
+        0% {
+          stroke-dashoffset: 48;
+        }
+        100% {
+          stroke-dashoffset: 0;
+        }
+      }
+
+      @keyframes slideInText {
+        0% {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        100% {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes fadeIn {
+        0% {
+          opacity: 0;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+
+      #checkCircle {
+        animation: slideInCircle 0.6s ease-out 0.3s forwards;
+      }
+
+      #checkPath {
+        animation: drawCheckmark 0.6s ease-out 0.8s forwards;
+      }
+
+      #successTitle {
+        animation: slideInText 0.6s ease-out 0.4s forwards;
+      }
+
+      #applicationInfo {
+        animation: slideInText 0.6s ease-out 0.6s forwards;
+      }
+
+      #successSubtitle {
+        animation: slideInText 0.6s ease-out 0.8s forwards;
+      }
+
+      #redirectText {
+        animation: fadeIn 0.6s ease-out 1.2s forwards;
+      }
+
+      #viewApplicationsBtn {
+        animation: slideInText 0.6s ease-out 1s forwards !important;
+      }
+
+      #backToHomeBtn {
+        animation: slideInText 0.6s ease-out 1.1s forwards !important;
+      }
+ #printApplicationBtn {
+        animation: slideInText 0.6s ease-out 1.05s forwards !important;
+      }
+
+      #printApplicationBtn:hover {
+        background-color: rgba(255, 255, 255, 0.2);
+        transform: scale(1.05);
+      }
+
+      #printApplicationBtn:active {
+        transform: scale(0.98);
+      }
+      #viewApplicationsBtn:hover {
+        transform: scale(1.05);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+      }
+
+      #viewApplicationsBtn:active {
+        transform: scale(0.98);
+      }
+
+      #backToHomeBtn:hover {
+        background-color: rgba(255, 255, 255, 0.2);
+        transform: scale(1.05);
+      }
+
+      #backToHomeBtn:active {
+        transform: scale(0.98);
+      }
+    </style>
+  `;
+
+    document.body.insertAdjacentHTML('beforeend', successPageHTML);
+
+    const redirectToView = () => {
+      const container = document.getElementById('successPageContainer');
+      if (container) {
+        container.remove();
+      }
+      window.location.href = `/Application`;
+    };
+
+    const redirectToHome = () => {
+      const container = document.getElementById('successPageContainer');
+      if (container) {
+        container.remove();
+      }
+      window.location.href = `/`;
+    };
+
+    // Auto redirect after 15 seconds
+    let countdown = 15;
+    const countdownInterval = setInterval(() => {
+      countdown--;
+      const countdownElement = document.getElementById('countdown');
+      if (countdownElement) {
+        countdownElement.textContent = countdown;
+      }
+
+      if (countdown <= 0) {
+        clearInterval(countdownInterval);
+        redirectToView();
+      }
+    }, 1000);
+
+    // View Applications Button click handler
+    document.getElementById('viewApplicationsBtn').addEventListener('click', function () {
+      clearInterval(countdownInterval);
+      redirectToView();
+    });
+
+    document.getElementById("printApplicationBtn").addEventListener("click", async function () {
+      try {
+        await printSubmittedApplication(applicationNumber);
+      } catch (error) {
+        console.error("Print failed:", error);
+        alert("Unable to generate print view.");
+      }
+    });
+
+    document.getElementById("backToHomeBtn").addEventListener("click", function () {
+      clearInterval(countdownInterval);
+      redirectToHome();
+    });
+  }
+  document.getElementById("printFormApplicationBtn").addEventListener("click", async function () {
+    try {
+      await printSubmittedApplication(applicationNumber);
+    } catch (error) {
+      console.error("Print failed:", error);
+      alert("Unable to generate print view.");
+    }
+  });
+
+  //Print Functionality Start
+  async function printSubmittedApplication(applicationNumber) {
+    await renderApplicationView("print", applicationNumber);
+  }
+
+  async function getAllSectionsForPrint() {
+    const allSections = [];
+    for (const step of steps) {
+      const currentSectionId = step.dataset.section;
+      const currentSectionTitle = step.dataset.title || "";
+      const key = cacheKey(currentSectionId);
+
+      let questions = questionsCache.get(key);
+
+      if (!questions) {
+        const result = await fetch(
+          `get-portal-data?flowId=${flowId}&sectionId=${currentSectionId}`
+        );
+        const response = await result.text();
+        const data = JSON.parse(response.trim());
+        questions = data.value || [];
+        questionsCache.set(key, questions);
+      }
+      allSections.push({
+        sectionId: currentSectionId,
+        sectionTitle: currentSectionTitle,
+        questions,
+      });
+    }
+    return allSections;
+  }
+
+  async function renderApplicationView(mode, applicationNumber = "") {
+    const sections = await getAllSectionsForPrint();
+
+    let resolvedApplicationNumber = applicationNumber || "";
+
+    if (!resolvedApplicationNumber && submissionId) {
+      try {
+        const applicationDetails = await fetch(`/_api/lpi_applications(${submissionId})`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" }
+        }).then((response) => response.json());
+
+        resolvedApplicationNumber = applicationDetails?.lpi_name || "";
+      } catch (error) {
+        console.warn("Could not fetch application number", error);
+      }
+    }
+
+    if (mode === "print") {
+      const printableHtml = buildPrintableHtml(sections, resolvedApplicationNumber);
+      openPrintWindow(printableHtml);
+      return;
+    }
+    renderSummaryInContainer(sections, resolvedApplicationNumber);
+  }
+
+  function buildApplicationSectionsHtml(allSections, mode = "print") {
+    return allSections
+      .map((section) => {
+        const grouped = {};
+
+        section.questions.forEach((item) => {
+          const subsection = item["HSS.lpi_subsectiontitle"];
+          if (!grouped[subsection]) grouped[subsection] = [];
+          grouped[subsection].push(item);
+        });
+        const subsectionHtml = Object.keys(grouped)
+          .map((subsection) => {
+            const questionsHtml = grouped[subsection]
+              .map((item) => {
+                const questionBody = item["QF.lpi_questionbody"] || "";
+                const dataType = item["QF.lpi_answerdatatype"];
+                if (dataType === "HTML") {
+                  return `
+                  <div class="${mode === "print" ? "print-html-block" : "summary-html-block"}">
+                    ${sanitizeTrustedHtml(questionBody)}
+                  </div>
+                `;
+                }
+                const answerHtml = formatAnswerForPrint(item);
+                return `
+                <div class="${mode === "print" ? "print-question" : "summary-question"}">
+                  <div class="${mode === "print" ? "print-question-title" : "summary-question-title"}">
+                    ${escapeHtml(questionBody)}
+                  </div>
+                  <div class="${mode === "print" ? "print-answer" : "summary-answer"}">
+                    ${answerHtml}
+                  </div>
+                </div>
+              `;
+              })
+              .join("");
+
+            return `
+            <div class="${mode === "print" ? "print-subsection" : "summary-subsection"}">
+              <h3>${escapeHtml(subsection)}</h3>
+              ${questionsHtml}
+            </div>
+          `;
+          })
+          .join("");
+
+        return `
+        <section class="${mode === "print" ? "print-section" : "summary-section"}">
+          <h2>${escapeHtml(section.sectionTitle)}</h2>
+          ${subsectionHtml}
+        </section>
+      `;
+      })
+      .join("");
+  }
+
+  function renderSummaryInContainer(allSections, applicationNumber) {
+  isSummaryView = true;
+  sectionTitle.innerText = "Application Summary";
+
+  const sectionsHtml = buildApplicationSectionsHtml(allSections, "summary");
+
+  container.innerHTML = `
+    <style>
+      .summary-section {
+        margin-bottom: 20px;
+      }
+
+      .summary-subsection {
+        margin-bottom: 12px;
+      }
+
+      .summary-subsection h3 {
+        margin: 0 0 10px 0;
+      }
+
+      .summary-question {
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #e2e2e2;
+        text-align: left;
+      }
+
+      .summary-question-title {
+        font-weight: 700;
+        margin: 0 0 4px 0;
+        text-align: left;
+      }
+
+      .summary-answer {
+        margin: 0;
+        padding: 0;
+        text-align: left;
+      }
+
+      .summary-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+      }
+
+      .summary-table th,
+      .summary-table td {
+        border: 1px solid #bbb;
+        padding: 6px 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .summary-table th {
+        background: #f5f5f5;
+        font-weight: 700;
+      }
+        .summary-logo { max-height: 24px; width: auto; object-fit: contain; }
+     
+    </style>
+
+    <div class="summary-view subsection-card mb-4 p-3 border rounded">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+       <div style="width:100%">
+          <img class="summary-logo" src="${portalLogoUrl}" alt="Deloitte logo" />
+        <div>
+          <h1 class="mb-1">${escapeHtml(applicationTitle)}</h1>
+          <div><strong>Application Number:</strong> ${escapeHtml(applicationNumber || "")}</div>
+          <div><strong>Application ID:</strong> ${escapeHtml(submissionId || "")}</div>
+          <div><strong>Generated On:</strong> ${escapeHtml(new Date().toLocaleString())}</div>
+        </div>
+        <button type="button" id="backToFormBtn" class="btn btn-outline-primary" style="float:right">
+          Back to Form
+        </button>
+      </div>
+      </div>
+      ${sectionsHtml}
+    </div>
+  `;
+
+  nextBtn.disabled = true;
+  summaryBtn.disabled = true;
+  submitBtn.disabled = isReadOnly;
+
+  document.getElementById("backToFormBtn").addEventListener("click", async function () {
+    isSummaryView = false;
+    await activateStep(steps[currentStepIndex]);
+    updateButtons();
+  });
+}
+  function buildPrintableHtml(allSections, applicationNumber) {
+    const sectionsHtml = buildApplicationSectionsHtml(allSections, "print");
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Application Print View</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              color: #222;
+              margin: 24px;
+              line-height: 1.4;
+            }
+
+            h1, h2, h3 {
+              margin-bottom: 8px;
+            }
+
+            .print-meta {
+              margin-bottom: 24px;
+              padding-bottom: 12px;
+              border-bottom: 2px solid #ccc;
+            }
+
+           .print-section {
+  margin-bottom: 20px;
+  page-break-inside: avoid;
+}
+
+.print-subsection {
+  margin-bottom: 12px;
+}
+
+.print-subsection h3 {
+  margin: 0 0 10px 0;
+}
+
+.print-question {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e2e2e2;
+  text-align: left;
+}
+
+.print-question-title {
+  font-weight: 700;
+  margin: 0 0 4px 0;
+  text-align: left;
+}
+
+.print-answer {
+  margin: 0;
+  padding: 0;
+  text-align: left;
+} 
+
+            .print-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 8px;
+            }
+
+            .print-table th,
+            .print-table td {
+              border: 1px solid #bbb;
+              padding: 6px 8px;
+              text-align: left;
+              vertical-align: top;
+            }
+
+            .print-table th {
+              background: #f5f5f5;
+            }
+
+            @media print {
+              body {
+                margin: 12mm;
+              }
+            }
+               .print-logo { max-height: 24px; width: auto; object-fit: contain; }
+          </style>
+        </head>
+        <body>
+          <img class="print-logo" src="${portalLogoUrl}" alt="Deloitte logo" />
+          <h1>${escapeHtml(applicationTitle)}</h1>
+          <div class="print-meta">
+            <div><strong>Application Number:</strong> ${escapeHtml(applicationNumber || "")}</div>
+            <div><strong>Application ID:</strong> ${escapeHtml(submissionId || "")}</div>
+            <div><strong>Printed On:</strong> ${escapeHtml(new Date().toLocaleString())}</div>
+          </div>
+          ${sectionsHtml}
+        </body>
+      </html>
+    `;
+  }
+
+  function sanitizeTrustedHtml(html) {
+    if (!html) return "";
+
+    const template = document.createElement("template");
+    template.innerHTML = html;
+
+    template.content.querySelectorAll("script, iframe, object, embed").forEach((el) => el.remove());
+
+    template.content.querySelectorAll("*").forEach((el) => {
+      [...el.attributes].forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        const value = attr.value || "";
+
+        if (name.startsWith("on")) {
+          el.removeAttribute(attr.name);
+        }
+
+        if ((name === "href" || name === "src") && value.trim().toLowerCase().startsWith("javascript:")) {
+          el.removeAttribute(attr.name);
+        }
+      });
+    });
+
+    return template.innerHTML;
+  }
+  function formatAnswerForPrint(item) {
+    const questionId = String(item["QF.lpi_questionframework1id"]);
+    const dataType = item["QF.lpi_answerdatatype"];
+
+    if (dataType === "Table") {
+      return formatTableAnswerForPrint(questionId, item["QF.lpi_tableschema"]);
+    }
+
+    const answer = answersStore.get(questionId);
+
+    if (!answer) {
+      return "<em>No answer provided</em>";
+    }
+
+    if (dataType === "File") {
+      return answer.fileData?.fileName
+        ? `Attached file: ${escapeHtml(answer.fileData.fileName)}`
+        : "<em>No file attached</em>";
+    }
+
+    return answer.answerValue
+      ? escapeHtml(answer.answerValue)
+      : "<em>No answer provided</em>";
+  }
+
+  function formatTableAnswerForPrint(questionId, tableConfig) {
+    const rows = [];
+
+    answersStore.forEach((value) => {
+      if (
+        String(value.questionId) === String(questionId) &&
+        value.dataType === "Table" &&
+        !value.isDeleted &&
+        value.answerValue
+      ) {
+        rows.push(value);
+      }
+    });
+
+    if (!rows.length) {
+      return "<em>No answer provided</em>";
+    }
+
+    const configuredColumns = Array.isArray(tableConfig?.columns)
+      ? tableConfig.columns.map((col) => ({
+        key: String(col.key || ""),
+        label: col.label || col.key || "",
+      }))
+      : [];
+
+    const groupedRows = new Map();
+
+    rows.forEach((row) => {
+      const rowIndex = Number(row.rowNumber || 0);
+
+      if (!groupedRows.has(rowIndex)) {
+        groupedRows.set(rowIndex, {});
+      }
+
+      groupedRows.get(rowIndex)[String(row.columnName)] = row.answerValue || "";
+    });
+
+    const fallbackColumns = Array.from(
+      new Set(rows.map((row) => String(row.columnName)))
+    ).map((key) => ({ key, label: key }));
+
+    const columns = configuredColumns.length ? configuredColumns : fallbackColumns;
+
+    const headerHtml = columns
+      .map((col) => `<th>${escapeHtml(col.label)}</th>`)
+      .join("");
+
+    const bodyHtml = Array.from(groupedRows.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, rowData]) => {
+        const cellHtml = columns
+          .map((col) => `<td>${escapeHtml(rowData[col.key] || "")}</td>`)
+          .join("");
+
+        return `<tr>${cellHtml}</tr>`;
+      })
+      .join("");
+
+    return `
+    <table class="print-table summary-table">
+      <thead>
+        <tr>${headerHtml}</tr>
+      </thead>
+      <tbody>
+        ${bodyHtml}
+      </tbody>
+    </table>
+  `;
+  }
+
+  function openPrintWindow(html) {
+    const printWindow = window.open("", "_blank", "width=1200,height=900");
+
+    if (!printWindow) {
+      alert("Pop-up blocked. Please allow pop-ups to print.");
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+
+    printWindow.onload = function () {
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+      }, 400);
+    };
+  }
+  // Print & Summary Functionality Over
+
+  async function goToStep(targetIndex) {
+    try {
+      if (targetIndex === currentStepIndex && !isSummaryView) return;
+      if (!isSummaryView && !validateCurrentStep()) return;
+
+      setLoading(true);
+
+      const size = await collectAnswers();
+
+      if (submissionId == null && size > 0 && !isEditMode) {
+        submissionId = await createApplication();
+      }
+
+      if (!isReadOnly) {
+        await buildAnsPayload();
+      }
+
+      isSummaryView = false;
+      currentStepIndex = targetIndex;
+      await activateStep(steps[currentStepIndex]);
+    } catch (error) {
+      console.error("Error saving Answers:", error);
+      alert("Failed to save data. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+
+  function CleanFetchForWebAPI(fetchXml) {
+    return fetchXml.replace(/\r?\n|\r/g, "").replace(/>\s+</g, "><");
+  }
+  function ensureFilePreviewModal() {
+    if (document.getElementById("filePreviewModal")) return;
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `
+    <div class="modal fade" id="filePreviewModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header d-flex justify-content-between align-items-center">
+            <h5 class="modal-title mb-0">File Preview</h5>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              data-bs-dismiss="modal"
+              aria-label="Close">
+              &times;
+            </button>
+          </div>
+          <div class="modal-body">
+            <div id="filePreviewModalContent"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `
+    );
+  }
+  function escapeHtml(text) {
+    if (!text) return "";
+    const map = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;",
+    };
+    return text.replace(/[&<>"']/g, (m) => map[m]);
+  }
+  function openFilePreviewModal(file) {
+    ensureFilePreviewModal();
+    const modalEl = document.getElementById("filePreviewModal");
+    const contentEl = document.getElementById("filePreviewModalContent");
+    const titleEl = modalEl.querySelector(".modal-title");
+    const objectUrl = URL.createObjectURL(file);
+    titleEl.textContent = file.name;
+    contentEl.innerHTML = "";
+    if (file.type.startsWith("image/")) {
+      contentEl.innerHTML = `<img src="${objectUrl}" alt="${escapeHtml(
+        file.name
+      )}" class="img-fluid rounded" />`;
+    } else if (file.type === "application/pdf") {
+      contentEl.innerHTML = `<iframe src="${objectUrl}" style="width:100%;height:75vh;border:0;"></iframe>`;
+    } else if (
+      file.type.startsWith("text/") ||
+      file.name.toLowerCase().endsWith(".txt")
+    ) {
+      file.text().then((text) => {
+        contentEl.innerHTML = `<pre style="white-space:pre-wrap;max-height:75vh;overflow:auto;">${escapeHtml(
+          text
+        )}</pre>`;
+      });
+    } else {
+      contentEl.innerHTML = `
+      <div class="alert alert-secondary mb-0">
+        Preview not available for this file type.<br>
+        <strong>${escapeHtml(file.name)}</strong>
+      </div>`;
+    }
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+
+  function previewExistingFile(fileData) {
+    ensureFilePreviewModal();
+    const modalEl = document.getElementById("filePreviewModal");
+    const contentEl = document.getElementById("filePreviewModalContent");
+    const titleEl = modalEl.querySelector(".modal-title");
+
+    titleEl.textContent = fileData.fileName;
+    contentEl.innerHTML = "";
+
+    const base64Data = fileData.base64Content;
+    const mimeType = fileData.fileType || "application/octet-stream";
+    const dataUrl = `data:${mimeType};base64,${base64Data}`;
+
+    if (mimeType.startsWith("image/")) {
+      contentEl.innerHTML = `<img src="${dataUrl}" alt="${escapeHtml(
+        fileData.fileName
+      )}" class="img-fluid rounded" />`;
+    } else if (mimeType === "application/pdf") {
+      contentEl.innerHTML = `<iframe src="${dataUrl}" style="width:100%;height:75vh;border:0;"></iframe>`;
+    } else if (mimeType.startsWith("text/")) {
+      try {
+        const binaryString = atob(base64Data);
+        const text = decodeURIComponent(escape(binaryString));
+        contentEl.innerHTML = `<pre style="white-space:pre-wrap;max-height:75vh;overflow:auto;">${escapeHtml(
+          text
+        )}</pre>`;
+      } catch (e) {
+        contentEl.innerHTML = `<div class="alert alert-secondary mb-0">Unable to preview text file.</div>`;
+      }
+    } else {
+      contentEl.innerHTML = `
+      <div class="alert alert-secondary mb-0">
+        Preview not available for this file type.<br>
+        <strong>${escapeHtml(fileData.fileName)}</strong>
+      </div>`;
+    }
+
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+  function bindFilePreviewWithAttachmentSupport(questionId, scope = document) {
+    const input = scope.querySelector(
+      `input[type="file"][data-questionid="${questionId}"]`
+    );
+    const textEl = scope.querySelector(`#file-preview-text-${questionId}`);
+    const previewBtn = scope.querySelector(`#file-preview-btn-${questionId}`);
+    const deleteBtn = scope.querySelector(`#file-delete-btn-${questionId}`);
+    if (!input || !textEl || !previewBtn || !deleteBtn) return;
+
+    let existingFileData = null;
+
+    const answerData = answersStore.get(questionId);
+    if (answerData && answerData.fileData) {
+      existingFileData = answerData.fileData;
+      textEl.textContent = `Current: ${existingFileData.fileName}`;
+      previewBtn.classList.remove("d-none");
+      if (!isReadOnly) {
+        deleteBtn.classList.remove("d-none");
+      }
+    }
+
+    input.addEventListener("change", function () {
+      const currentFile = this.files?.[0] || null;
+      if (!currentFile) {
+        return;
+      }
+      textEl.textContent = `New: ${currentFile.name} (${Math.round(
+        currentFile.size / 1024
+      )} KB)`;
+      previewBtn.classList.remove("d-none");
+      deleteBtn.classList.remove("d-none");
+      openFilePreviewModal(currentFile);
+    });
+
+    previewBtn.addEventListener("click", function () {
+      const currentFile = input.files?.[0] || null;
+      if (currentFile) {
+        openFilePreviewModal(currentFile);
+      } else if (existingFileData) {
+        previewExistingFile(existingFileData);
+      }
+    });
+  }
+
+function formatFileSize(bytes = 0) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function setInputFiles(input, files) {
+  const dt = new DataTransfer();
+  files.forEach((file) => dt.items.add(file));
+  input.files = dt.files;
+}
+
+function bindMultipleFilesAttachmentSupport(questionId, scope = document) {
+  const input = scope.querySelector(
+    `input[type="file"][data-questionid="${questionId}"][data-datatype="Multiple Files"]`
+  );
+  const textEl = scope.querySelector(`#file-preview-text-${questionId}`);
+  const tableWrapper = scope.querySelector(`#file-table-wrapper-${questionId}`);
+  const tbody = scope.querySelector(`#file-table-body-${questionId}`);
+
+  if (!input || !textEl || !tableWrapper || !tbody) return;
+
+  let replaceInput = scope.querySelector(`#file-replace-input-${questionId}`);
+  if (!replaceInput) {
+    replaceInput = document.createElement("input");
+    replaceInput.type = "file";
+    replaceInput.className = "d-none";
+    replaceInput.id = `file-replace-input-${questionId}`;
+    replaceInput.setAttribute("data-questionid", questionId);
+    if (input.accept) replaceInput.accept = input.accept;
+    input.parentNode.appendChild(replaceInput);
+  }
+
+  let selectedFilesState = Array.from(input.files || []);
+
+  const fileKey = (file) => [file.name, file.size, file.lastModified].join("|");
+
+  const getExistingFiles = () => {
+    const answerData = answersStore.get(questionId);
+    return Array.isArray(answerData?.filesData) ? answerData.filesData : [];
+  };
+
+  const getSelectedFiles = () => [...selectedFilesState];
+
+  const syncSelectedFiles = (files) => {
+    selectedFilesState = [...files];
+    setInputFiles(input, selectedFilesState);
+  };
+
+  const updateAnswerStore = (existingFiles, selectedFiles) => {
+    const current = answersStore.get(questionId) || {};
+    const allNames = [
+      ...existingFiles.map((f) => f.fileName || ""),
+      ...selectedFiles.map((f) => f.name || "")
+    ].filter(Boolean);
+
+    answersStore.set(questionId, {
+      ...current,
+      filesData: existingFiles,
+      answerValue: allNames.join(", "),
+      isNewFile: selectedFiles.length > 0
+    });
+  };
+
+  const renderTable = () => {
+    const existingFiles = getExistingFiles();
+    const selectedFiles = getSelectedFiles();
+    const totalFiles = existingFiles.length + selectedFiles.length;
+
+    if (!totalFiles) {
+      textEl.textContent = "No file selected";
+      tableWrapper.classList.add("d-none");
+      tbody.innerHTML = "";
+      return;
+    }
+
+    textEl.textContent = `${totalFiles} file(s) selected`;
+    tableWrapper.classList.remove("d-none");
+
+    const rows = [];
+
+    existingFiles.forEach((file, index) => {
+      rows.push(`
+        <tr>
+          <td class="text-center">${rows.length + 1}</td>
+          <td class="text-start">${escapeHtml(file.fileName || "")}</td>
+          <td class="text-start">${formatFileSize(file.fileSize || 0)}</td>
+          <td>
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-sm btn-outline-primary multiple-file-preview-btn"
+                data-source="existing" data-index="${index}">
+                Preview
+              </button>
+              ${isReadOnly ? "" : `
+                <button type="button" class="btn btn-sm btn-outline-primary multiple-file-replace-btn"
+                  data-source="existing" data-index="${index}">
+                  Replace
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger multiple-file-delete-btn"
+                  data-source="existing" data-index="${index}">
+                  Delete
+                </button>
+              `}
+            </div>
+          </td>
+        </tr>
+      `);
+    });
+
+    selectedFiles.forEach((file, index) => {
+      rows.push(`
+        <tr>
+          <td>${rows.length + 1}</td>
+          <td>${escapeHtml(file.name)}</td>
+          <td>${formatFileSize(file.size)}</td>
+          <td>
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-sm btn-outline-primary multiple-file-preview-btn"
+                data-source="new" data-index="${index}">
+                Preview
+              </button>
+              ${isReadOnly ? "" : `
+                <button type="button" class="btn btn-sm btn-outline-primary multiple-file-replace-btn"
+                  data-source="new" data-index="${index}">
+                  Replace
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger multiple-file-delete-btn"
+                  data-source="new" data-index="${index}">
+                  Delete
+                </button>
+              `}
+            </div>
+          </td>
+        </tr>
+      `);
+    });
+
+    tbody.innerHTML = rows.join("");
+    updateAnswerStore(existingFiles, selectedFiles);
+  };
+
+  if (!input.dataset.multiFilesChangeBound) {
+    input.addEventListener("change", function () {
+      const incomingFiles = Array.from(this.files || []);
+      if (!incomingFiles.length) return;
+
+      const merged = getSelectedFiles();
+
+      incomingFiles.forEach((newFile) => {
+        const idx = merged.findIndex((file) => fileKey(file) === fileKey(newFile));
+        if (idx >= 0) {
+          merged[idx] = newFile;
+        } else {
+          merged.push(newFile);
+        }
+      });
+
+      syncSelectedFiles(merged);
+      this.value = "";
+      renderTable();
+    });
+
+    input.dataset.multiFilesChangeBound = "true";
+  }
+
+  if (!replaceInput.dataset.multiFilesReplaceBound) {
+    replaceInput.addEventListener("change", function () {
+      const replacementFile = replaceInput.files?.[0];
+      const source = replaceInput.dataset.source;
+      const index = Number(replaceInput.dataset.index);
+
+      if (!replacementFile || Number.isNaN(index)) {
+        replaceInput.value = "";
+        return;
+      }
+
+      if (source === "new") {
+        const selectedFiles = getSelectedFiles();
+        selectedFiles[index] = replacementFile;
+        syncSelectedFiles(selectedFiles);
+      } else if (source === "existing") {
+        const current = answersStore.get(questionId) || {};
+        const existingFiles = [...getExistingFiles()];
+        const selectedFiles = getSelectedFiles();
+
+        existingFiles.splice(index, 1);
+        selectedFiles.push(replacementFile);
+
+        answersStore.set(questionId, {
+          ...current,
+          filesData: existingFiles
+        });
+
+        syncSelectedFiles(selectedFiles);
+      }
+
+      replaceInput.value = "";
+      delete replaceInput.dataset.source;
+      delete replaceInput.dataset.index;
+      renderTable();
+    });
+
+    replaceInput.dataset.multiFilesReplaceBound = "true";
+  }
+
+  if (!tbody.dataset.multiFilesClickBound) {
+    tbody.addEventListener("click", function (e) {
+      const previewBtn = e.target.closest(".multiple-file-preview-btn");
+      if (previewBtn) {
+        const source = previewBtn.dataset.source;
+        const index = Number(previewBtn.dataset.index);
+
+        if (source === "new") {
+          const file = getSelectedFiles()[index];
+          if (file) openFilePreviewModal(file);
+        } else {
+          const fileData = getExistingFiles()[index];
+          if (fileData) previewExistingFile(fileData);
+        }
+        return;
+      }
+
+      const replaceBtn = e.target.closest(".multiple-file-replace-btn");
+      if (replaceBtn && !isReadOnly) {
+        replaceInput.dataset.source = replaceBtn.dataset.source;
+        replaceInput.dataset.index = replaceBtn.dataset.index;
+        replaceInput.click();
+        return;
+      }
+
+      const deleteBtn = e.target.closest(".multiple-file-delete-btn");
+      if (!deleteBtn || isReadOnly) return;
+
+      const source = deleteBtn.dataset.source;
+      const index = Number(deleteBtn.dataset.index);
+
+      if (source === "new") {
+        const selectedFiles = getSelectedFiles();
+        selectedFiles.splice(index, 1);
+        syncSelectedFiles(selectedFiles);
+      } else {
+        const current = answersStore.get(questionId) || {};
+        const existingFiles = [...getExistingFiles()];
+        existingFiles.splice(index, 1);
+
+        answersStore.set(questionId, {
+          ...current,
+          filesData: existingFiles
+        });
+      }
+
+      renderTable();
+    });
+
+    tbody.dataset.multiFilesClickBound = "true";
+  }
+
+  renderTable();
+}
+
+
+  // Update buildAnsPayload() function
+  async function buildAnsPayload() {
+    if (!submissionId) return;
+    try {
+      const token = await getRequestVerificationToken();
+      const createPromises = [];
+      const updatePromises = [];
+      const deletePromises = [];
+
+      // FIRST: Handle deleted file annotations
+      for (const [questionId, annotationIdOrStatus] of fileAnnotationsMap.entries()) {
+        if (annotationIdOrStatus === "DELETE") {
+          deletePromises.push(
+            (async () => {
+              try {
+                // Find the actual annotation ID from the answer store
+                const answerData = answersStore.get(questionId);
+                if (answerData && answerData.answerId) {
+                  const annotations = await fetchAnnotationsForUserResponse(answerData.answerId);
+                  if (annotations && annotations.length > 0) {
+                    for (const annotation of annotations) {
+                      await deleteFileAnnotation(annotation.annotationid);
+                    }
+                  }
+                }
+                fileAnnotationsMap.delete(questionId);
+              } catch (error) {
+                console.error(`Error deleting annotation for question ${questionId}:`, error);
+              }
+            })()
+          );
+        }
+      }
+
+      // Wait for all deletions to complete before processing other operations
+      await Promise.all(deletePromises);
+
+      answersStore.forEach((ans) => {
+        const {
+			  questionId,
+			  answerId,
+			  answerValue,
+			  originalValue,
+			  dataType,
+			  rowNumber = null,
+			  columnName = null,
+			  fileData = null,
+			  filesData = null,
+			  isNewFile = false,
+			  isDeleted
+			} = ans;
+        if (ans.isDeleted && ans.answerId) {
+          updatePromises.push(
+            fetch(`/_api/lpi_userresponses(${ans.answerId})`, {
+              method: "DELETE",
+              headers: {
+                __RequestVerificationToken: token,
+                "If-Match": "*"
+              }
+            }).then(() => {
+              const key =
+                ans.dataType === "Table"
+                  ? `${ans.questionId}_${ans.rowNumber}_${ans.columnName}`
+                  : ans.questionId;
+              answersStore.delete(key);
+            })
+          );
+          return;
+        }
+        if (!answerId) {
+          let createPayload = {
+            "lpi_Application@odata.bind": `/lpi_applications(${submissionId})`,
+            "lpi_Question@odata.bind": `/lpi_questionframework1s(${questionId})`,
+            "lpi_Contact@odata.bind": `/contacts(${contactId})`,
+            lpi_questiondatatype: dataType,
+            lpi_answer: answerValue || "",
+          };
+
+          if (dataType === "Table" && rowNumber !== null && columnName) {
+            createPayload.lpi_rownumber = rowNumber;
+            createPayload.lpi_columnname = columnName;
+          }
+          createPromises.push(
+            fetch("/_api/lpi_userresponses", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                __RequestVerificationToken: token,
+              },
+              body: JSON.stringify(createPayload),
+            }).then(async (res) => {
+              if (!res.ok) {
+                throw new Error(await res.text());
+              }
+              const id = res.headers.get("entityid");
+              const storeKey =
+                dataType === "Table"
+                  ? `${questionId}_${rowNumber}_${columnName}`
+                  : questionId;
+              answersStore.set(storeKey, {
+                ...ans,
+                answerId: id,
+                originalValue: answerValue,
+              });
+
+              // If file, create annotation
+              if (dataType === "File" && fileData) {
+                const annotationId = await createFileAnnotation(id, questionId, fileData);
+                if (annotationId) {
+                  fileAnnotationsMap.set(questionId, annotationId);
+                }
+              }
+            })
+          );
+        } else if (dataType === "File" && isNewFile && fileData) {
+          // File replacement scenario
+          updatePromises.push(
+            (async () => {
+              try {
+                const updatePayload = {
+                  lpi_answer: answerValue || "",
+                };
+
+                const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+                  method: "PATCH",
+                  headers: {
+                    "Content-Type": "application/json",
+                    __RequestVerificationToken: token,
+                  },
+                  body: JSON.stringify(updatePayload),
+                });
+
+                if (!res.ok) {
+                  throw new Error(await res.text());
+                }
+
+                console.log(`Updated user response ${answerId} for question ${questionId}`);
+
+                const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
+
+                if (currentAnnotations && currentAnnotations.length > 0) {
+                  for (const annotation of currentAnnotations) {
+                    console.log(`Deleting old annotation ${annotation.annotationid}`);
+                    const deleteSuccess = await deleteFileAnnotation(annotation.annotationid);
+                    if (deleteSuccess) {
+                      console.log(`Old annotation ${annotation.annotationid} deleted successfully`);
+                    }
+                  }
+                }
+
+                const newAnnotationId = await createFileAnnotation(answerId, questionId, fileData);
+                if (newAnnotationId) {
+                  fileAnnotationsMap.set(questionId, newAnnotationId);
+                  console.log(`New annotation ${newAnnotationId} created for question ${questionId}`);
+                }
+
+                answersStore.set(questionId, {
+                  ...ans,
+                  answerId: answerId,
+                  originalValue: answerValue,
+                  isNewFile: false,
+                });
+              } catch (error) {
+                console.error(`Error during file replacement for question ${questionId}:`, error);
+                throw error;
+              }
+            })()
+          );
+        } else if (dataType === "File" && !fileData && answerId && originalValue) {
+          // File was deleted - need to clear the answer and delete annotation
+          updatePromises.push(
+            (async () => {
+              try {
+                const updatePayload = {
+                  lpi_answer: "",
+                };
+
+                const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+                  method: "PATCH",
+                  headers: {
+                    "Content-Type": "application/json",
+                    __RequestVerificationToken: token,
+                  },
+                  body: JSON.stringify(updatePayload),
+                });
+
+                if (!res.ok) {
+                  throw new Error(await res.text());
+                }
+
+                // Delete associated annotations
+                const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
+                if (currentAnnotations && currentAnnotations.length > 0) {
+                  for (const annotation of currentAnnotations) {
+                    await deleteFileAnnotation(annotation.annotationid);
+                  }
+                }
+
+                answersStore.set(questionId, {
+                  ...ans,
+                  answerId: answerId,
+                  originalValue: "",
+                  isNewFile: false,
+                  fileData: null,
+                });
+              } catch (error) {
+                console.error(`Error deleting file for question ${questionId}:`, error);
+                throw error;
+              }
+            })()
+          );
+        }
+		 else if (dataType === "Multiple Files") {
+  if (!answerId && Array.isArray(filesData) && filesData.length) {
+    createPromises.push(
+      (async () => {
+        const createPayload = {
+          "lpi_Application@odata.bind": `/lpi_applications(${submissionId})`,
+          "lpi_Question@odata.bind": `/lpi_questionframework1s(${questionId})`,
+          "lpi_Contact@odata.bind": `/contacts(${contactId})`,
+          lpi_questiondatatype: dataType,
+          lpi_answer: answerValue || "",
+        };
+
+        const res = await fetch("/_api/lpi_userresponses", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            __RequestVerificationToken: token,
+          },
+          body: JSON.stringify(createPayload),
+        });
+
+        if (!res.ok) {
+          throw new Error(await res.text());
+        }
+
+        const id = res.headers.get("entityid");
+
+        answersStore.set(questionId, {
+          ...ans,
+          answerId: id,
+          originalValue: answerValue,
+          isNewFile: false,
+        });
+
+        for (const file of filesData) {
+          await createFileAnnotation(id, questionId, file);
+        }
+      })()
+    );
+  } else if (answerId && Array.isArray(filesData) && isNewFile) {
+    updatePromises.push(
+      (async () => {
+        try {
+          const updatePayload = {
+            lpi_answer: answerValue || "",
+          };
+
+          const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              __RequestVerificationToken: token,
+            },
+            body: JSON.stringify(updatePayload),
+          });
+
+          if (!res.ok) {
+            throw new Error(await res.text());
+          }
+
+          const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
+
+          if (currentAnnotations && currentAnnotations.length > 0) {
+            for (const annotation of currentAnnotations) {
+              await deleteFileAnnotation(annotation.annotationid);
+            }
+          }
+
+          for (const file of filesData) {
+            await createFileAnnotation(answerId, questionId, file);
+          }
+
+          answersStore.set(questionId, {
+            ...ans,
+            answerId,
+            originalValue: answerValue,
+            isNewFile: false,
+          });
+        } catch (error) {
+          console.error(`Error saving multiple files for question ${questionId}:`, error);
+          throw error;
+        }
+      })()
+    );
+  } else if (answerId && !Array.isArray(filesData) && originalValue && !answerValue) {
+    updatePromises.push(
+      (async () => {
+        const updatePayload = { lpi_answer: "" };
+
+        const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            __RequestVerificationToken: token,
+          },
+          body: JSON.stringify(updatePayload),
+        });
+
+        if (!res.ok) {
+          throw new Error(await res.text());
+        }
+
+        const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
+        if (currentAnnotations?.length) {
+          for (const annotation of currentAnnotations) {
+            await deleteFileAnnotation(annotation.annotationid);
+          }
+        }
+
+        answersStore.set(questionId, {
+          ...ans,
+          answerId,
+          originalValue: "",
+          isNewFile: false,
+          fileData: null,
+          filesData: [],
+        });
+      })()
+    );
+  }
+        } else if (answerValue !== originalValue) {
+          const updatePayload = {
+            lpi_answer: answerValue || "",
+          };
+
+          if (dataType === "Table" && rowNumber !== null && columnName) {
+            updatePayload.lpi_rownumber = rowNumber;
+            updatePayload.lpi_columnname = columnName;
+          }
+
+          updatePromises.push(
+            fetch(`/_api/lpi_userresponses(${answerId})`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                __RequestVerificationToken: token,
+              },
+              body: JSON.stringify(updatePayload),
+            }).then(async () => {
+              const storeKey =
+                dataType === "Table"
+                  ? `${questionId}_${rowNumber}_${columnName}`
+                  : questionId;
+              answersStore.set(storeKey, {
+                ...ans,
+                answerId: answerId,
+                originalValue: answerValue,
+                isNewFile: false,
+              });
+            })
+          );
+        }
+      });
+
+      await Promise.all([...createPromises, ...updatePromises]);
+      console.log("Answers and files saved successfully");
+    } catch (error) {
+      console.error("Error saving answers:", error);
+      throw error;
+    }
+  }
+
+  function getRequestVerificationToken() {
+    return new Promise((resolve, reject) => {
+      shell.getTokenDeferred().done(resolve).fail(reject);
+    });
+  }
+
+  function ensureTableRowCount(questionId, targetRowCount) {
+    const block = container.querySelector(
+      `[data-question-block-id="${questionId}"]`
+    );
+    if (!block) return;
+    const addBtn = block.querySelector("button.add-row");
+    if (!addBtn) return;
+    let currentRowCount = block.querySelectorAll(
+      `[data-questionid="${questionId}"][data-datatype="Table"][data-rowindex]`
+    ).length;
+    const uniqueRows = new Set(
+      Array.from(
+        block.querySelectorAll(
+          `[data-questionid="${questionId}"][data-datatype="Table"][data-rowindex]`
+        )
+      ).map((el) => el.dataset.rowindex)
+    );
+    currentRowCount = uniqueRows.size;
+    while (currentRowCount < targetRowCount) {
+      addBtn.click();
+      currentRowCount++;
+    }
+  }
+  window.addEventListener("beforeunload", function (e) {
+    if (isReadOnly || !hasDraftChanges) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+
+});
