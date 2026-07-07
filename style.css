@@ -1,36 +1,640 @@
-/* Lookup dropdown styles */
-.crm-lookup-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: auto;
-  background: #fff;
-  border: 1px solid #d0d7e2;
-  border-radius: 4px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
-  max-height: 220px;
-  overflow-y: auto;
-  z-index: 2000;
-  min-width: 220px;
-  font-size: 14px;
-}
+Add Lookup support inside table cells in the same way you already support top-level Lookup questions: render a searchable input, fetch matching records, store both display text and selected ID, restore saved values, and print the display text.
 
-.crm-lookup-item {
-  padding: 6px 10px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+Below is the cleanest way to implement it with the smallest change to your current structure.
 
-.crm-lookup-item:hover {
-  background: #eef6ff;
-  color: #1d4ed8; /* nice blue */
-}
+What needs to change
 
-.crm-lookup-item.selected {
-  background: #dbeafe;
-  color: #1e3a8a;
-  font-weight: 600;
+Your current table code supports:
+
+• Text
+• Date
+• Number
+• Decimal
+• Picklist
+
+You want to add:
+
+• Lookup inside table columns
+
+That affects these parts:
+
+Table schema support for lookup column config
+renderTableCell() to render lookup cell UI
+lookup binding for table lookup inputs
+collectAnswers() to save table lookup values
+restoreAnswers() to restore table lookup values
+formatTableAnswerForPrint() to print lookup display text correctly
+
+Expected table schema for Lookup column
+
+Your q.tableConfig.columns should allow something like this:
+
+``json
+{
+  "columns": [
+    { "key": "name", "label": "Name", "type": "Text" },
+    { "key": "department", "label": "Department", "type": "Lookup", "lookupEntityName": "accounts", "lookupDisplayFields": "name" },
+    { "key": "status", "label": "Status", "type": "Picklist", "options": "Active,Inactive" }
+  ]
 }
+`
+
+For each lookup column, add:
+
+• lookupEntityName
+• lookupDisplayFields
+
+Update renderTableCell() to support Lookup
+
+Replace your current renderTableCell() with this version:
+
+`js
+function renderTableCell(questionId, rowIndex, col, childId = "") {
+  const attrs = 
+    class="form-control"
+    data-questionid="${questionId}"
+    data-datatype="Table"
+    data-rowindex="${rowIndex}"
+    data-columnkey="${col.key || ""}"
+    data-childid="${childId}"
+  ;
+
+  switch (col.type) {
+    case "Date":
+      return <input style="font-size: 14px;" type="date" ${attrs}>;
+
+    case "Number":
+      return <input style="font-size: 14px;" type="number" ${attrs}>;
+
+    case "Decimal":
+      return <input style="font-size: 14px;" type="number" step="0.01" ${attrs}>;
+
+    case "Picklist": {
+      let options = <option value="">-- Select an option --</option>;
+      if (col.options) {
+        const optionMarkup = col.options
+          .split(",")
+          .map((opt) => opt.trim())
+          .filter(Boolean);
+
+        options += optionMarkup
+          .map((opt) => <option value="${opt}">${opt}</option>)
+          .join("");
+      }
+
+      return 
+        <select style="font-size: 14px;" ${attrs}>
+          ${options}
+        </select>
+      ;
+    }
+
+    case "Lookup": {
+      const entityName = col.lookupEntityName || "";
+      const displayFields = col.lookupDisplayFields || "";
+
+      if (!entityName) {
+        return <div class="alert alert-warning mb-0"><small>Lookup config missing</small></div>;
+      }
+
+      return 
+        <div class="table-lookup-wrapper">
+          <div class="input-group">
+            <input
+              type="text"
+              style="font-size: 14px;"
+              class="form-control table-lookup-search-input"
+              data-questionid="${questionId}"
+              data-datatype="Table"
+              data-rowindex="${rowIndex}"
+              data-columnkey="${col.key || ""}"
+              data-column-type="Lookup"
+              data-lookup-entity="${entityName}"
+              data-lookup-fields="${displayFields}"
+              autocomplete="off"
+              placeholder="Search..."
+            />
+            <button
+              type="button"
+              class="btn btn-outline-secondary table-lookup-search-btn"
+              data-questionid="${questionId}"
+              data-rowindex="${rowIndex}"
+              data-columnkey="${col.key || ""}">
+              🔍
+            </button>
+          </div>
+          <ul
+            class="list-group table-lookup-results mt-1"
+            id="table-lookup-results-${questionId}-${rowIndex}-${col.key}"
+            style="max-height: 220px; overflow:auto;">
+          </ul>
+        </div>
+      ;
+    }
+
+    default:
+      return <input style="font-size: 14px;" type="text" ${attrs}>;
+  }
+}
+`
+
+Bind lookup behavior for table lookup cells
+
+Add this new function near populateLookupDropdowns():
+
+`js
+async function populateTableLookupDropdowns() {
+  const inputs = container.querySelectorAll(".table-lookup-search-input");
+
+  function debounce(fn, wait) {
+    let t;
+    const wrapped = function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
+    wrapped.cancel = () => clearTimeout(t);
+    return wrapped;
+  }
+
+  function escapeODataString(s) {
+    if (s == null) return "";
+    return String(s).replace(/'/g, "''");
+  }
+
+  for (const input of inputs) {
+    if (input.dataset.lookupBound === "true") continue;
+
+    const questionId = input.dataset.questionid;
+    const rowIndex = input.dataset.rowindex;
+    const columnKey = input.dataset.columnkey;
+    const entityName = input.dataset.lookupEntity || "";
+    const displayFieldsStr = input.dataset.lookupFields || "";
+    const resultsList = document.getElementById(
+      table-lookup-results-${questionId}-${rowIndex}-${columnKey}
+    );
+
+    if (!entityName || !displayFieldsStr || !resultsList) continue;
+
+    const displayFields = displayFieldsStr
+      .split(",")
+      .map((f) => f.trim())
+      .filter(Boolean);
+
+    const entityNameLower = entityName.toLowerCase();
+    const entityNameSingular = entityNameLower.endsWith("s")
+      ? entityNameLower.slice(0, -1)
+      : entityNameLower;
+    const idField = ${entityNameSingular}id;
+    const selectFields = [idField, ...displayFields].join(",");
+
+    function renderResults(records) {
+      resultsList.innerHTML = "";
+
+      if (!records || records.length === 0) {
+        const li = document.createElement("li");
+        li.className = "list-group-item small text-muted";
+        li.textContent = "No records found";
+        resultsList.appendChild(li);
+        return;
+      }
+
+      for (const rec of records) {
+        const displayObj = {};
+        for (const f of displayFields) {
+          displayObj[f] = rec[f] != null ? String(rec[f]) : "";
+        }
+
+        const displayText = displayFields
+          .map((f) => displayObj[f])
+          .filter(Boolean)
+          .join(", ");
+
+        const li = document.createElement("li");
+        li.className = "list-group-item list-group-item-action";
+        li.tabIndex = 0;
+        li.textContent = displayText;
+        li.dataset.recordId = rec[idField];
+        li.dataset.display = JSON.stringify(displayObj);
+
+        li.addEventListener("click", function () {
+          input.value = displayText;
+          input.dataset.display = this.dataset.display;
+          input.dataset.selectedId = this.dataset.recordId;
+          resultsList.innerHTML = "";
+          hasDraftChanges = true;
+        });
+
+        li.addEventListener("keydown", function (ev) {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            this.click();
+          }
+        });
+
+        resultsList.appendChild(li);
+      }
+    }
+
+    const performSearch = debounce(async (term) => {
+      try {
+        resultsList.innerHTML = <li class="list-group-item small text-muted">Searching...</li>;
+
+        const token = await getRequestVerificationToken();
+        const top = 10;
+        let apiUrl = /api/${entityNameLower}?$select=${encodeURIComponent(selectFields)}&$top=${top};
+
+        const trimmed = (term || "").trim();
+        if (trimmed && displayFields.length > 0) {
+          const q = displayFields
+            .map((f) => contains(${f},'${escapeODataString(trimmed)}'))
+            .join(" or ");
+          apiUrl += &$filter=${encodeURIComponent(q)};
+        }
+
+        const res = await fetch(apiUrl, {
+          headers: {
+            Accept: "application/json",
+            RequestVerificationToken: token,
+          },
+        });
+
+        if (!res.ok) {
+          resultsList.innerHTML = <li class="list-group-item small text-muted">Search failed</li>;
+          return;
+        }
+
+        const data = await res.json();
+        renderResults(Array.isArray(data.value) ? data.value.slice(0, 10) : []);
+      } catch (err) {
+        console.error("Table lookup search error", err);
+        resultsList.innerHTML = <li class="list-group-item small text-muted">Error</li>;
+      }
+    }, 250);
+
+    input.addEventListener("input", function () {
+      delete input.dataset.selectedId;
+      delete input.dataset.display;
+      performSearch(this.value);
+    });
+
+    const btn = input.parentNode.querySelector(".table-lookup-search-btn");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        performSearch(input.value);
+      });
+    }
+
+    document.addEventListener("click", function (ev) {
+      const wrapper = input.closest(".table-lookup-wrapper");
+      if (wrapper && !wrapper.contains(ev.target)) {
+        resultsList.innerHTML = "";
+      }
+    });
+
+    input.dataset.lookupBound = "true";
+    performSearch("");
+  }
+}
+`
+
+Call the new table lookup binder after rendering
+
+Inside renderQuestions() add this line:
+
+`js
+populateTableLookupDropdowns();
+`
+
+Put it right after:
+
+`js
+populateLookupDropdowns();
+`
+
+So this part becomes:
+
+`js
+populateLookupDropdowns();
+populateTableLookupDropdowns();
+attachCheckboxListeners();
+restoreAnswers();
+`
+
+Update collectAnswers() for table lookup values
+
+Your current table block only saves plain input.value. That works visually, but for lookup you also want to preserve selected record metadata.
+
+Replace the if (dataType === "Table") { ... } block in collectAnswers() with this version:
+
+`js
+if (dataType === "Table") {
+  const tableInputs = container.querySelectorAll(
+    [data-questionid="${questionId}"][data-datatype="Table"]
+  );
+
+  tableInputs.forEach((inputEl) => {
+    const value = (inputEl.value || "").trim();
+    const rowIndex = inputEl.dataset.rowindex;
+    const columnKey = inputEl.dataset.columnkey;
+
+    const key = ${questionId}${rowIndex}${columnKey};
+    const existing = answersStore.get(key) || {};
+
+    if (!value) {
+      if (existing.answerId) {
+        answersStore.set(key, {
+          ...existing,
+          answerValue: "",
+          selectedId: null,
+          displayValue: "",
+        });
+      } else {
+        answersStore.delete(key);
+      }
+      return;
+    }
+
+    const isLookupCell = inputEl.dataset.columnType === "Lookup";
+
+    answersStore.set(key, {
+      questionId,
+      answerId: existing.answerId || null,
+      dataType,
+      rowNumber: Number(rowIndex),
+      columnName: columnKey,
+      answerValue: value,
+      displayValue: value,
+      selectedId: isLookupCell ? inputEl.dataset.selectedId || null : null,
+      originalValue: existing.originalValue,
+    });
+  });
+
+  handledQuestions.add(questionId);
+  return;
+}
+`
+
+Update restoreAnswers() for table lookup cells
+
+In your current restoreAnswers(), table cells are restored by:
+
+`js
+if (input) {
+  input.value = answerValue || "";
+}
+`
+
+Replace that part with:
+
+`js
+if (input) {
+  input.value = answerValue || "";
+
+  if (input.dataset.columnType === "Lookup") {
+    if (answer.selectedId) {
+      input.dataset.selectedId = answer.selectedId;
+    }
+    if (answer.displayValue) {
+      input.dataset.display = JSON.stringify({
+        restored: answer.displayValue
+      });
+    }
+  }
+}
+`
+
+Full table block becomes:
+
+`js
+if (dataType === "Table") {
+  if (rowNumber == null || !columnName) {
+    return;
+  }
+
+  ensureTableRowCount(questionId, Number(rowNumber) + 1);
+
+  const input = container.querySelector(
+    [data-questionid="${questionId}"][data-rowindex="${rowNumber}"][data-columnkey="${columnName}"]
+  );
+
+  if (input) {
+    input.value = answerValue || "";
+
+    if (input.dataset.columnType === "Lookup") {
+      if (answer.selectedId) {
+        input.dataset.selectedId = answer.selectedId;
+      }
+      if (answer.displayValue) {
+        input.dataset.display = JSON.stringify({
+          restored: answer.displayValue
+        });
+      }
+    }
+  }
+
+  return;
+}
+`
+
+Update formatTableAnswerForPrint() so lookup text prints correctly
+
+Your existing print code already uses answerValue, which is fine if you store the display text there.
+
+So if you use the collectAnswers() change above, no major print change is required.
+
+But if you want to explicitly prefer display text, replace:
+
+`js
+groupedRows.get(rowIndex)[String(row.columnName)] = row.answerValue || "";
+`
+
+with:
+
+`js
+groupedRows.get(rowIndex)[String(row.columnName)] =
+  row.displayValue || row.answerValue || "";
+`
+
+Important: preserve lookup config when adding rows
+
+When you click Add Row, this line already reloads columns from cache:
+
+`js
+const columns = (tableConfig || '{"columns":[]}').columns || [];
+`
+
+That is fine only if tableConfig is already an object.
+
+But earlier you use:
+
+`js
+const columns = q.tableConfig.columns || [];
+`
+
+So make sure QF.lpitableschema is consistently an object, not a JSON string.
+
+If it may be a string, normalize it once.
+
+Safer version for renderTableQuestion()
+
+`js
+function renderTableQuestion(q) {
+  const parsedConfig =
+    typeof q.tableConfig === "string"
+      ? JSON.parse(q.tableConfig || '{"columns":[]}')
+      : (q.tableConfig || { columns: [] });
+
+  const columns = parsedConfig.columns || [];
+  const tbodyId = tbody-${q.questionid};
+  const headerHtml = columns
+    .map((c) => <th>${c.label || c.key || ""}</th>)
+    .join("");
+  const rowsHtml = Array.from({ length: 2 }, (, i) =>
+    renderTableRow(q.questionid, columns, i)
+  ).join("");
+
+  return 
+    <div class="table-question">
+      <div class="table-responsive">
+        <table class="table table-bordered align-middle">
+          <thead><tr>${headerHtml}</tr></thead>
+          <tbody id="${tbodyId}">${rowsHtml}</tbody>
+        </table>
+      </div>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-outline-primary add-row" data-qid="${q.questionid}">
+          Add Row
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-danger remove-row" data-qid="${q.questionid}">
+          Remove Row
+        </button>
+      </div>
+    </div>
+  ;
+}
+`
+
+Safer version in Add Row click handler
+
+Replace:
+
+`js
+const tableConfig = item["QF.lpitableschema"];
+const columns = (tableConfig || '{"columns":[]}').columns || [];
+`
+
+with:
+
+`js
+const tableConfigRaw = item["QF.lpitableschema"];
+const tableConfig =
+  typeof tableConfigRaw === "string"
+    ? JSON.parse(tableConfigRaw || '{"columns":[]}')
+    : (tableConfigRaw || { columns: [] });
+
+const columns = tableConfig.columns || [];
+`
+
+And after adding the row, bind lookup again:
+
+`js
+tbody.insertAdjacentHTML(
+  "beforeend",
+  renderTableRow(qid, columns, tbody.rows.length)
+);
+
+populateTableLookupDropdowns();
+restoreAnswers();
+`
+
+Recommended improvement for persistence
+
+Right now your top-level Lookup stores:
+
+• answerValue: display text
+• selectedId: selected record id
+
+For table lookup, you're doing the same.
+
+That is fine for display, but if later you need to truly bind to Dataverse lookup values, storing only the display text in lpianswer is not enough. A stronger pattern is:
+
+• lpi_answer = display text
+• another field = record id
+• another field = entity logical name
+
+If your backend supports only one text field, your current approach is okay for now.
+
+Minimal patch summary
+
+If you want just the essential edits, do these:
+
+Add support in renderTableCell()
+• new case "Lookup"
+
+Add new function
+• populateTableLookupDropdowns()
+
+Call it in renderQuestions()
+
+`js
+populateLookupDropdowns();
+populateTableLookupDropdowns();
+attachCheckboxListeners();
+restoreAnswers();
+`
+
+Update table block in collectAnswers()
+• save lookup display value and selected ID
+
+Update table restore logic
+• restore lookup text and selected ID
+
+Rebind after Add Row
+• call populateTableLookupDropdowns()
+
+One thing to watch out for
+
+This line in your global input tracker is okay:
+
+`js
+document.addEventListener("input", function () {
+  if (!isReadOnly) {
+    hasDraftChanges = true;
+  }
+});
+`
+
+But for lookup selection by clicking result items, the input value is set programmatically, so the global input event may not always fire. In the table lookup bind function I explicitly included:
+
+`js
+hasDraftChanges = true;
+`
+
+That avoids missing draft-change tracking.
+
+Final practical note
+
+Your current top-level lookup and table lookup now have duplicated logic. After this works, the next cleanup would be to extract shared search logic into one reusable helper like:
+
+`js
+bindLookupSearch({
+  input,
+  resultsList,
+  entityName,
+  displayFields,
+  onSelect
+});
+`
+
+That would reduce bugs and make future maintenance much easier.
+
+Here is the exact order I would implement:
+
+Add Lookup case in renderTableCell()
+Add populateTableLookupDropdowns()
+Call it after rendering questions
+Update collectAnswers() table logic
+Update restoreAnswers()
+Rebind after Add Row`
+
+If you want, I can now give you a fully merged version of only the changed functions so you can paste them directly into your file.
