@@ -202,6 +202,7 @@ function updateButtons() {
   );
 
   populateLookupDropdowns();
+  populateTableLookupDropdowns();
   attachCheckboxListeners();
   restoreAnswers();
 
@@ -687,6 +688,159 @@ case "Multiple Files": {
         return "";
     }
   }
+
+async function populateTableLookupDropdowns() {
+  const inputs = container.querySelectorAll(".table-lookup-search-input");
+
+  function debounce(fn, wait) {
+    let t;
+    const wrapped = function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
+    wrapped.cancel = () => clearTimeout(t);
+    return wrapped;
+  }
+
+  function escapeODataString(s) {
+    if (s == null) return "";
+    return String(s).replace(/'/g, "''");
+  }
+
+  for (const input of inputs) {
+    if (input.dataset.lookupBound === "true") continue;
+
+    const questionId = input.dataset.questionid;
+    const rowIndex = input.dataset.rowindex;
+    const columnKey = input.dataset.columnkey;
+    const entityName = input.dataset.lookupEntity || "";
+    const displayFieldsStr = input.dataset.lookupFields || "";
+    const resultsList = document.getElementById(
+      `table-lookup-results-${questionId}-${rowIndex}-${columnKey}`
+    );
+
+    if (!entityName || !displayFieldsStr || !resultsList) continue;
+
+    const displayFields = displayFieldsStr
+      .split(",")
+      .map((f) => f.trim())
+      .filter(Boolean);
+
+    const entityNameLower = entityName.toLowerCase();
+    const entityNameSingular = entityNameLower.endsWith("s")
+      ? entityNameLower.slice(0, -1)
+      : entityNameLower;
+    const idField = `${entityNameSingular}id`;
+    const selectFields = [idField, ...displayFields].join(",");
+
+    function renderResults(records) {
+      resultsList.innerHTML = "";
+
+      if (!records || records.length === 0) {
+        const li = document.createElement("li");
+        li.className = "list-group-item small text-muted";
+        li.textContent = "No records found";
+        resultsList.appendChild(li);
+        return;
+      }
+
+      for (const rec of records) {
+        const displayObj = {};
+        for (const f of displayFields) {
+          displayObj[f] = rec[f] != null ? String(rec[f]) : "";
+        }
+
+        const displayText = displayFields
+          .map((f) => displayObj[f])
+          .filter(Boolean)
+          .join(", ");
+
+        const li = document.createElement("li");
+        li.className = "list-group-item list-group-item-action";
+        li.tabIndex = 0;
+        li.textContent = displayText;
+        li.dataset.recordId = rec[idField];
+        li.dataset.display = JSON.stringify(displayObj);
+
+        li.addEventListener("click", function () {
+          input.value = displayText;
+          input.dataset.display = this.dataset.display;
+          input.dataset.selectedId = this.dataset.recordId;
+          resultsList.innerHTML = "";
+          hasDraftChanges = true;
+        });
+
+        li.addEventListener("keydown", function (ev) {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            this.click();
+          }
+        });
+
+        resultsList.appendChild(li);
+      }
+    }
+
+    const performSearch = debounce(async (term) => {
+      try {
+        resultsList.innerHTML = `<li class="list-group-item small text-muted">Searching...</li>`;
+
+        const token = await getRequestVerificationToken();
+        const top = 10;
+        let apiUrl = `/api/${entityNameLower}?$select=${encodeURIComponent(selectFields)}&$top=${top}`;
+
+        const trimmed = (term || "").trim();
+        if (trimmed && displayFields.length > 0) {
+          const q = displayFields
+            .map((f) => `contains(${f},'${escapeODataString(trimmed)}')`)
+            .join(" or ");
+          apiUrl += `&$filter=${encodeURIComponent(q)}`;
+        }
+
+        const res = await fetch(apiUrl, {
+          headers: {
+            Accept: "application/json",
+            RequestVerificationToken: token,
+          },
+        });
+
+        if (!res.ok) {
+          resultsList.innerHTML = `<li class="list-group-item small text-muted">Search failed</li>`;
+          return;
+        }
+
+        const data = await res.json();
+        renderResults(Array.isArray(data.value) ? data.value.slice(0, 10) : []);
+      } catch (err) {
+        console.error("Table lookup search error", err);
+        resultsList.innerHTML = `<li class="list-group-item small text-muted">Error</li>`;
+      }
+    }, 250);
+
+    input.addEventListener("input", function () {
+      delete input.dataset.selectedId;
+      delete input.dataset.display;
+      performSearch(this.value);
+    });
+
+    const btn = input.parentNode.querySelector(".table-lookup-search-btn");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        performSearch(input.value);
+      });
+    }
+
+    document.addEventListener("click", function (ev) {
+      const wrapper = input.closest(".table-lookup-wrapper");
+      if (wrapper && !wrapper.contains(ev.target)) {
+        resultsList.innerHTML = "";
+      }
+    });
+
+    input.dataset.lookupBound = "true";
+    performSearch("");
+  }
+}
   // Melky Code : Lookup Dropdown
   // Melky Code : Lookup Dropdown - FIXED VERSION
   // Melky Code : Lookup Dropdown - FIXED VERSION 2
@@ -874,8 +1028,12 @@ async function populateLookupDropdowns() {
   // Melky code end
   // table functionality
   function renderTableQuestion(q) {
-    // const parsed = JSON.parse(q.tableConfig || '{"columns":[]}');
-    const columns = q.tableConfig.columns || [];
+  const parsedConfig =
+    typeof q.tableConfig === "string"
+      ? JSON.parse(q.tableConfig || '{"columns":[]}')
+      : (q.tableConfig || { columns: [] });
+
+  const columns = parsedConfig.columns || [];
     const tbodyId = `tbody-${q.questionid}`;
     const headerHtml = columns
       .map((c) => `<th>${c.label || c.key || ""}</th>`)
@@ -883,8 +1041,9 @@ async function populateLookupDropdowns() {
     const rowsHtml = Array.from({ length: 2 }, (_, i) =>
       renderTableRow(q.questionid, columns, i)
     ).join("");
-    return `
-    <div class="table-question">
+
+  return 
+    `<div class="table-question">
       <div class="table-responsive">
         <table class="table table-bordered align-middle">
           <thead><tr>${headerHtml}</tr></thead>
@@ -899,8 +1058,8 @@ async function populateLookupDropdowns() {
           Remove Row
         </button>
       </div>
-    </div>
-  `;
+    </div>`
+  ;
   }
   function renderTableRow(questionId, columns, rowIndex) {
     return `
@@ -941,6 +1100,48 @@ async function populateLookupDropdowns() {
         ${options}
       </select>`;
       }
+      case "Lookup": {
+      const entityName = col.lookupEntityName || "";
+      const displayFields = col.lookupDisplayFields || "";
+
+      if (!entityName) {
+        return `<div class="alert alert-warning mb-0"><small>Lookup config missing</small></div>`;
+      }
+      else{
+      return 
+        `<div class="table-lookup-wrapper">
+          <div class="input-group">
+            <input
+              type="text"
+              style="font-size: 14px;"
+              class="form-control table-lookup-search-input"
+              data-questionid="${questionId}"
+              data-datatype="Table"
+              data-rowindex="${rowIndex}"
+              data-columnkey="${col.key || ""}"
+              data-column-type="Lookup"
+              data-lookup-entity="${entityName}"
+              data-lookup-fields="${displayFields}"
+              autocomplete="off"
+              placeholder="Search..."
+            />
+            <button
+              type="button"
+              class="btn btn-outline-secondary table-lookup-search-btn"
+              data-questionid="${questionId}"
+              data-rowindex="${rowIndex}"
+              data-columnkey="${col.key || ""}">
+              🔍
+            </button>
+          </div>
+          <ul
+            class="list-group table-lookup-results mt-1"
+            id="table-lookup-results-${questionId}-${rowIndex}-${col.key}"
+            style="max-height: 220px; overflow:auto;">
+          </ul>
+        </div>`;
+      }
+    }
       default:
         return `<input style="font-size: 14px;" type="text" ${attrs}>`;
     }
@@ -982,12 +1183,21 @@ async function populateLookupDropdowns() {
         (x) => String(x["QF.lpi_questionframework1id"]) === String(qid)
       );
       if (!item) return;
-      const tableConfig = item["QF.lpi_tableschema"];
-      const columns = (tableConfig || '{"columns":[]}').columns || [];
+
+      const tableConfigRaw = item["QF.lpitableschema"];
+      const tableConfig =
+        typeof tableConfigRaw === "string"
+          ? JSON.parse(tableConfigRaw || '{"columns":[]}')
+          : (tableConfigRaw || { columns: [] });
+      const columns = tableConfig.columns || [];
+
       tbody.insertAdjacentHTML(
         "beforeend",
         renderTableRow(qid, columns, tbody.rows.length)
       );
+
+      populateTableLookupDropdowns();
+      restoreAnswers();
     }
   });
   // table functionality
@@ -1113,26 +1323,48 @@ if (dataType === "Lookup") {
   }
   return;
 }
-      // Melky
       if (dataType === "Table") {
         const tableInputs = container.querySelectorAll(
           `[data-questionid="${questionId}"][data-datatype="Table"]`
         );
-        tableInputs.forEach((input) => {
-          const value = (input.value || "").trim();
-          if (!value) return;
-          const key = `${questionId}_${input.dataset.rowindex}_${input.dataset.columnkey}`;
+
+  tableInputs.forEach((inputEl) => {
+    const value = (inputEl.value || "").trim();
+    const rowIndex = inputEl.dataset.rowindex;
+    const columnKey = inputEl.dataset.columnkey;
+
+    const key = `${questionId}${rowIndex}${columnKey}`;
           const existing = answersStore.get(key) || {};
+
+    if (!value) {
+      if (existing.answerId) {
+        answersStore.set(key, {
+          ...existing,
+          answerValue: "",
+          selectedId: null,
+          displayValue: "",
+        });
+      } else {
+        answersStore.delete(key);
+      }
+      return;
+    }
+
+    const isLookupCell = inputEl.dataset.columnType === "Lookup";
+
           answersStore.set(key, {
             questionId,
             answerId: existing.answerId || null,
             dataType,
-            rowNumber: Number(input.dataset.rowindex),
-            columnName: input.dataset.columnkey,
+      rowNumber: Number(rowIndex),
+      columnName: columnKey,
             answerValue: value,
+      displayValue: value,
+      selectedId: isLookupCell ? inputEl.dataset.selectedId || null : null,
             originalValue: existing.originalValue,
           });
         });
+
         handledQuestions.add(questionId);
         return;
       }
@@ -1251,53 +1483,63 @@ if (dataType === "Lookup") {
     });
     console.log(res);
     return res.headers.get("entityid");
-  }
-// Create File in Notes
-  async function createFileAnnotation(userResponseId, questionId, fileData) {
-    try {
-      const token = await getRequestVerificationToken();
-
-      const annotationPayload = {
-        "objectid_lpi_userresponse@odata.bind": `/lpi_userresponses(${userResponseId})`,
-        objecttypecode: "lpi_userresponse",
-        subject: `File Upload - Question ${questionId}`,
-        notetext: `File: ${fileData.fileName} (${fileData.fileSize} bytes)`,
-        filename: fileData.fileName,
-        documentbody: fileData.base64Content,
-        mimetype: fileData.fileType,
-      };
-
-      console.log("Creating annotation for userresponse:", userResponseId);
-
-      const response = await fetch("/_api/annotations", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          __RequestVerificationToken: token,
-        },
-        body: JSON.stringify(annotationPayload),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Annotation creation failed:", errorText);
-        return null;
-      }
-
-      let data;
-      try {
-        data = await response.json();
-        console.log("Annotation created successfully:", data.annotationid);
-        return data.annotationid;
-      } catch (parseError) {
-        console.log("Annotation created but no response body");
-        return null;
-      }
-    } catch (error) {
-      console.error("Error creating annotation:", error);
-      return null;
     }
+	async function normalizeFileForAnnotation(file) {
+	  if (!file) return null;
+
+	  if (file.base64Content && file.fileName) {
+		return {
+		  fileName: file.fileName,
+		  fileSize: file.fileSize || 0,
+		  fileType: file.fileType || "application/octet-stream",
+		  base64Content: file.base64Content
+		};
+	  }
+
+	  const base64Content = await fileToBase64(file);
+	  return {
+		fileName: file.name,
+		fileSize: file.size,
+		fileType: file.type || "application/octet-stream",
+		base64Content
+	  };
+	}
+
+ async function createFileAnnotation(userResponseId, questionId, fileData) {
+  try {
+    const token = await getRequestVerificationToken();
+    const normalized = await normalizeFileForAnnotation(fileData);
+
+    const annotationPayload = {
+      "objectid_lpi_userresponse@odata.bind": `/lpi_userresponses(${userResponseId})`,
+      objecttypecode: "lpi_userresponse",
+      subject: `File Upload - Question ${questionId}`,
+      notetext: `File: ${normalized.fileName} (${normalized.fileSize} bytes)`,
+      filename: normalized.fileName,
+      documentbody: normalized.base64Content,
+      mimetype: normalized.fileType
+    };
+
+    const response = await fetch("/_api/annotations", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        __RequestVerificationToken: token
+      },
+      body: JSON.stringify(annotationPayload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText);
+    }
+
+    return response.headers.get("entityid") || null;
+  } catch (error) {
+    console.error("Error creating annotation:", error);
+    throw error;
   }
+}
 // Delete File in Notes
   async function deleteFileAnnotation(annotationId) {
     try {
@@ -1385,24 +1627,46 @@ if (dataType === "Lookup") {
         };
 
         // For File type, fetch from annotations
-        if (dataType === "File" && answerId) {
-          console.log(`Loading file for question ${questionId}, response ${answerId}`);
-          const annotations = await fetchAnnotationsForUserResponse(answerId);
+		if (dataType === "File" && answerId) {
+		  console.log(`Loading file for question ${questionId}, response ${answerId}`);
+		  const annotations = await fetchAnnotationsForUserResponse(answerId);
 
-          if (annotations.length > 0) {
-            const annotation = annotations[0];
-            storeData.fileData = {
-              fileName: annotation.filename,
-              fileSize: 0,
-              fileType: annotation.mimetype,
-              base64Content: annotation.documentbody,
-            };
-            // Store annotation ID for later updates
-            fileAnnotationsMap.set(questionId, annotation.annotationid);
-            console.log(`Loaded file from annotation: ${annotation.filename}`);
-          }
-        }
+		  if (annotations.length > 0) {
+			const annotation = annotations[0];
+			storeData.fileData = {
+			  fileName: annotation.filename,
+			  fileSize: 0,
+			  fileType: annotation.mimetype,
+			  base64Content: annotation.documentbody,
+			};
+			fileAnnotationsMap.set(questionId, annotation.annotationid);
+			console.log(`Loaded file from annotation: ${annotation.filename}`);
+		  }
+		}
 
+		// For Multiple Files, fetch all annotations and store them in filesData
+		if (dataType === "Multiple Files" && answerId) {
+		  console.log(`Loading multiple files for question ${questionId}, response ${answerId}`);
+		  const annotations = await fetchAnnotationsForUserResponse(answerId);
+
+		  if (Array.isArray(annotations) && annotations.length > 0) {
+			storeData.filesData = annotations.map((annotation) => ({
+			  fileName: annotation.filename,
+			  fileSize: annotation.filesize || annotation.fileSize || 0,
+			  fileType: annotation.mimetype,
+			  base64Content: annotation.documentbody,
+			  annotationId: annotation.annotationid
+			}));
+
+			storeData.newFilesData = [];
+			storeData.answerValue = annotations.map((a) => a.filename).join(", ");
+			storeData.originalValue = storeData.answerValue;
+			console.log(`Loaded ${annotations.length} existing file(s) for question ${questionId}`);
+		  } else {
+			storeData.filesData = [];
+			storeData.newFilesData = [];
+		  }
+		}
         answersStore.set(key, storeData);
       }
 
@@ -1464,6 +1728,17 @@ if (dataType === "Lookup") {
         );
         if (input) {
           input.value = answerValue || "";
+
+          if (input.dataset.columnType === "Lookup") {
+            if (answer.selectedId) {
+              input.dataset.selectedId = answer.selectedId;
+            }
+            if (answer.displayValue) {
+              input.dataset.display = JSON.stringify({
+                restored: answer.displayValue
+              });
+            }
+          }
         }
         return;
       }
@@ -2536,7 +2811,7 @@ function validateUrl(value) {
         groupedRows.set(rowIndex, {});
       }
 
-      groupedRows.get(rowIndex)[String(row.columnName)] = row.answerValue || "";
+      groupedRows.get(rowIndex)[String(row.columnName)] = row.displayValue || row.answerValue || "";
     });
 
     const fallbackColumns = Array.from(
@@ -2816,32 +3091,35 @@ function bindMultipleFilesAttachmentSupport(questionId, scope = document) {
 
   const fileKey = (file) => [file.name, file.size, file.lastModified].join("|");
 
-  const getExistingFiles = () => {
-    const answerData = answersStore.get(questionId);
-    return Array.isArray(answerData?.filesData) ? answerData.filesData : [];
-  };
+	const getExistingFiles = () => {
+	  const answerData = answersStore.get(questionId);
+	  return Array.isArray(answerData?.filesData) ? answerData.filesData : [];
+	};
 
-  const getSelectedFiles = () => [...selectedFilesState];
+	const getSelectedFiles = () => [...selectedFilesState];
 
-  const syncSelectedFiles = (files) => {
-    selectedFilesState = [...files];
-    setInputFiles(input, selectedFilesState);
-  };
+	const syncSelectedFiles = (files) => {
+	  selectedFilesState = [...files];
+	  setInputFiles(input, selectedFilesState);
+	};
 
-  const updateAnswerStore = (existingFiles, selectedFiles) => {
-    const current = answersStore.get(questionId) || {};
-    const allNames = [
-      ...existingFiles.map((f) => f.fileName || ""),
-      ...selectedFiles.map((f) => f.name || "")
-    ].filter(Boolean);
+		  const updateAnswerStore = (existingFiles, selectedFiles) => {
+		  const current = answersStore.get(questionId) || {};
+		  const allNames = [
+			...existingFiles.map((f) => f.fileName || ""),
+			...selectedFiles.map((f) => f.name || "")
+		  ].filter(Boolean);
 
-    answersStore.set(questionId, {
-      ...current,
-      filesData: existingFiles,
-      answerValue: allNames.join(", "),
-      isNewFile: selectedFiles.length > 0
-    });
-  };
+		  answersStore.set(questionId, {
+			...current,
+			questionId,
+			dataType: "Multiple Files",
+			filesData: existingFiles,
+			newFilesData: selectedFiles,
+			answerValue: allNames.join(", "),
+			isNewFile: selectedFiles.length > 0
+		  });
+		};
 
   const renderTable = () => {
     const existingFiles = getExistingFiles();
@@ -2922,24 +3200,24 @@ function bindMultipleFilesAttachmentSupport(questionId, scope = document) {
 
   if (!input.dataset.multiFilesChangeBound) {
     input.addEventListener("change", function () {
-      const incomingFiles = Array.from(this.files || []);
-      if (!incomingFiles.length) return;
+	  const incomingFiles = Array.from(this.files || []);
+	  if (!incomingFiles.length) return;
 
-      const merged = getSelectedFiles();
+	  const merged = getSelectedFiles();
 
-      incomingFiles.forEach((newFile) => {
-        const idx = merged.findIndex((file) => fileKey(file) === fileKey(newFile));
-        if (idx >= 0) {
-          merged[idx] = newFile;
-        } else {
-          merged.push(newFile);
-        }
-      });
+	  incomingFiles.forEach((newFile) => {
+		const idx = merged.findIndex((file) => fileKey(file) === fileKey(newFile));
+		if (idx >= 0) {
+		  merged[idx] = newFile;
+		} else {
+		  merged.push(newFile);
+		}
+	  });
 
-      syncSelectedFiles(merged);
-      this.value = "";
-      renderTable();
-    });
+	  syncSelectedFiles(merged);
+	  renderTable();
+	});
+
 
     input.dataset.multiFilesChangeBound = "true";
   }
@@ -3041,378 +3319,399 @@ function bindMultipleFilesAttachmentSupport(questionId, scope = document) {
 
 
   // Update buildAnsPayload() function
-  async function buildAnsPayload() {
-    if (!submissionId) return;
-    try {
-      const token = await getRequestVerificationToken();
-      const createPromises = [];
-      const updatePromises = [];
-      const deletePromises = [];
+async function buildAnsPayload() {
+  if (!submissionId) return;
 
-      // FIRST: Handle deleted file annotations
-      for (const [questionId, annotationIdOrStatus] of fileAnnotationsMap.entries()) {
-        if (annotationIdOrStatus === "DELETE") {
-          deletePromises.push(
-            (async () => {
-              try {
-                // Find the actual annotation ID from the answer store
-                const answerData = answersStore.get(questionId);
-                if (answerData && answerData.answerId) {
-                  const annotations = await fetchAnnotationsForUserResponse(answerData.answerId);
-                  if (annotations && annotations.length > 0) {
-                    for (const annotation of annotations) {
-                      await deleteFileAnnotation(annotation.annotationid);
-                    }
-                  }
-                }
-                fileAnnotationsMap.delete(questionId);
-              } catch (error) {
-                console.error(`Error deleting annotation for question ${questionId}:`, error);
-              }
-            })()
-          );
-        }
-      }
+  try {
+    const token = await getRequestVerificationToken();
+    const createPromises = [];
+    const updatePromises = [];
+    const deletePromises = [];
 
-      // Wait for all deletions to complete before processing other operations
-      await Promise.all(deletePromises);
-
-      answersStore.forEach((ans) => {
-        const {
-			  questionId,
-			  answerId,
-			  answerValue,
-			  originalValue,
-			  dataType,
-			  rowNumber = null,
-			  columnName = null,
-			  fileData = null,
-			  filesData = null,
-			  isNewFile = false,
-			  isDeleted
-			} = ans;
-        if (ans.isDeleted && ans.answerId) {
-          updatePromises.push(
-            fetch(`/_api/lpi_userresponses(${ans.answerId})`, {
-              method: "DELETE",
-              headers: {
-                __RequestVerificationToken: token,
-                "If-Match": "*"
-              }
-            }).then(() => {
-              const key =
-                ans.dataType === "Table"
-                  ? `${ans.questionId}_${ans.rowNumber}_${ans.columnName}`
-                  : ans.questionId;
-              answersStore.delete(key);
-            })
-          );
-          return;
-        }
-        if (!answerId) {
-          let createPayload = {
-            "lpi_Application@odata.bind": `/lpi_applications(${submissionId})`,
-            "lpi_Question@odata.bind": `/lpi_questionframework1s(${questionId})`,
-            "lpi_Contact@odata.bind": `/contacts(${contactId})`,
-            lpi_questiondatatype: dataType,
-            lpi_answer: answerValue || "",
-          };
-
-          if (dataType === "Table" && rowNumber !== null && columnName) {
-            createPayload.lpi_rownumber = rowNumber;
-            createPayload.lpi_columnname = columnName;
-          }
-          createPromises.push(
-            fetch("/_api/lpi_userresponses", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                __RequestVerificationToken: token,
-              },
-              body: JSON.stringify(createPayload),
-            }).then(async (res) => {
-              if (!res.ok) {
-                throw new Error(await res.text());
-              }
-              const id = res.headers.get("entityid");
-              const storeKey =
-                dataType === "Table"
-                  ? `${questionId}_${rowNumber}_${columnName}`
-                  : questionId;
-              answersStore.set(storeKey, {
-                ...ans,
-                answerId: id,
-                originalValue: answerValue,
-              });
-
-              // If file, create annotation
-              if (dataType === "File" && fileData) {
-                const annotationId = await createFileAnnotation(id, questionId, fileData);
-                if (annotationId) {
-                  fileAnnotationsMap.set(questionId, annotationId);
-                }
-              }
-            })
-          );
-        } else if (dataType === "File" && isNewFile && fileData) {
-          // File replacement scenario
-          updatePromises.push(
-            (async () => {
-              try {
-                const updatePayload = {
-                  lpi_answer: answerValue || "",
-                };
-
-                const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
-                  method: "PATCH",
-                  headers: {
-                    "Content-Type": "application/json",
-                    __RequestVerificationToken: token,
-                  },
-                  body: JSON.stringify(updatePayload),
-                });
-
-                if (!res.ok) {
-                  throw new Error(await res.text());
-                }
-
-                console.log(`Updated user response ${answerId} for question ${questionId}`);
-
-                const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
-
-                if (currentAnnotations && currentAnnotations.length > 0) {
-                  for (const annotation of currentAnnotations) {
-                    console.log(`Deleting old annotation ${annotation.annotationid}`);
-                    const deleteSuccess = await deleteFileAnnotation(annotation.annotationid);
-                    if (deleteSuccess) {
-                      console.log(`Old annotation ${annotation.annotationid} deleted successfully`);
-                    }
-                  }
-                }
-
-                const newAnnotationId = await createFileAnnotation(answerId, questionId, fileData);
-                if (newAnnotationId) {
-                  fileAnnotationsMap.set(questionId, newAnnotationId);
-                  console.log(`New annotation ${newAnnotationId} created for question ${questionId}`);
-                }
-
-                answersStore.set(questionId, {
-                  ...ans,
-                  answerId: answerId,
-                  originalValue: answerValue,
-                  isNewFile: false,
-                });
-              } catch (error) {
-                console.error(`Error during file replacement for question ${questionId}:`, error);
-                throw error;
-              }
-            })()
-          );
-        } else if (dataType === "File" && !fileData && answerId && originalValue) {
-          // File was deleted - need to clear the answer and delete annotation
-          updatePromises.push(
-            (async () => {
-              try {
-                const updatePayload = {
-                  lpi_answer: "",
-                };
-
-                const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
-                  method: "PATCH",
-                  headers: {
-                    "Content-Type": "application/json",
-                    __RequestVerificationToken: token,
-                  },
-                  body: JSON.stringify(updatePayload),
-                });
-
-                if (!res.ok) {
-                  throw new Error(await res.text());
-                }
-
-                // Delete associated annotations
-                const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
-                if (currentAnnotations && currentAnnotations.length > 0) {
-                  for (const annotation of currentAnnotations) {
+    // 1) Delete annotations flagged for single-file delete/replace flow
+    for (const [questionId, annotationIdOrStatus] of fileAnnotationsMap.entries()) {
+      if (annotationIdOrStatus === "DELETE") {
+        deletePromises.push(
+          (async () => {
+            try {
+              const answerData = answersStore.get(questionId);
+              if (answerData && answerData.answerId) {
+                const annotations = await fetchAnnotationsForUserResponse(answerData.answerId);
+                if (annotations && annotations.length > 0) {
+                  for (const annotation of annotations) {
                     await deleteFileAnnotation(annotation.annotationid);
                   }
                 }
-
-                answersStore.set(questionId, {
-                  ...ans,
-                  answerId: answerId,
-                  originalValue: "",
-                  isNewFile: false,
-                  fileData: null,
-                });
-              } catch (error) {
-                console.error(`Error deleting file for question ${questionId}:`, error);
-                throw error;
               }
+              fileAnnotationsMap.delete(questionId);
+            } catch (error) {
+              console.error(`Error deleting annotation for question ${questionId}:`, error);
+            }
+          })()
+        );
+      }
+    }
+
+    await Promise.all(deletePromises);
+
+    answersStore.forEach((ans) => {
+      const {
+        questionId,
+        answerId,
+        answerValue,
+        originalValue,
+        dataType,
+        rowNumber = null,
+        columnName = null,
+        fileData = null,
+        filesData = null,
+        newFilesData = null,
+        isNewFile = false,
+        isDeleted
+      } = ans;
+
+      // 2) Delete answer row entirely
+      if (isDeleted && answerId) {
+        updatePromises.push(
+          fetch(`/_api/lpi_userresponses(${answerId})`, {
+            method: "DELETE",
+            headers: {
+              __RequestVerificationToken: token,
+              "If-Match": "*"
+            }
+          }).then(() => {
+            const key =
+              dataType === "Table"
+                ? `${questionId}_${rowNumber}_${columnName}`
+                : questionId;
+            answersStore.delete(key);
+          })
+        );
+        return;
+      }
+
+      // 3) MULTIPLE FILES - handle before generic create branch
+      if (dataType === "Multiple Files") {
+        const existingFiles = Array.isArray(filesData) ? filesData : [];
+        const newFiles = Array.isArray(newFilesData) ? newFilesData : [];
+
+        const finalAnswerValue = [
+          ...existingFiles.map((f) => f.fileName || ""),
+          ...newFiles.map((f) => f.name || f.fileName || "")
+        ]
+          .filter(Boolean)
+          .join(", ");
+
+        // New answer + multiple notes
+        if (!answerId && (existingFiles.length > 0 || newFiles.length > 0)) {
+          createPromises.push(
+            (async () => {
+              const createPayload = {
+                "lpi_Application@odata.bind": `/lpi_applications(${submissionId})`,
+                "lpi_Question@odata.bind": `/lpi_questionframework1s(${questionId})`,
+                "lpi_Contact@odata.bind": `/contacts(${contactId})`,
+                lpi_questiondatatype: dataType,
+                lpi_answer: finalAnswerValue
+              };
+
+              const res = await fetch("/_api/lpi_userresponses", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  __RequestVerificationToken: token
+                },
+                body: JSON.stringify(createPayload)
+              });
+
+              if (!res.ok) {
+                throw new Error(await res.text());
+              }
+
+              const id = res.headers.get("entityid");
+
+              for (const file of newFiles) {
+                await createFileAnnotation(id, questionId, file);
+              }
+
+              const savedAnnotations = await fetchAnnotationsForUserResponse(id);
+
+              answersStore.set(questionId, {
+                ...ans,
+                answerId: id,
+                answerValue: finalAnswerValue,
+                originalValue: finalAnswerValue,
+                filesData: savedAnnotations || [],
+                newFilesData: [],
+                isNewFile: false
+              });
+            })()
+          );
+          return;
+        }
+
+        // Existing answer + append newly selected files
+        if (answerId && (newFiles.length > 0 || finalAnswerValue !== (originalValue || ""))) {
+          updatePromises.push(
+            (async () => {
+              const updatePayload = {
+                lpi_answer: finalAnswerValue
+              };
+
+              const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  __RequestVerificationToken: token
+                },
+                body: JSON.stringify(updatePayload)
+              });
+
+              if (!res.ok) {
+                throw new Error(await res.text());
+              }
+
+              for (const file of newFiles) {
+                await createFileAnnotation(answerId, questionId, file);
+              }
+
+              const savedAnnotations = await fetchAnnotationsForUserResponse(answerId);
+
+              answersStore.set(questionId, {
+                ...ans,
+                answerId,
+                answerValue: finalAnswerValue,
+                originalValue: finalAnswerValue,
+                filesData: savedAnnotations || [],
+                newFilesData: [],
+                isNewFile: false
+              });
+            })()
+          );
+          return;
+        }
+
+        // Existing answer + all files removed
+        if (answerId && existingFiles.length === 0 && newFiles.length === 0 && originalValue) {
+          updatePromises.push(
+            (async () => {
+              const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  __RequestVerificationToken: token
+                },
+                body: JSON.stringify({ lpi_answer: "" })
+              });
+
+              if (!res.ok) {
+                throw new Error(await res.text());
+              }
+
+              const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
+              if (currentAnnotations?.length) {
+                for (const annotation of currentAnnotations) {
+                  await deleteFileAnnotation(annotation.annotationid);
+                }
+              }
+
+              answersStore.set(questionId, {
+                ...ans,
+                answerId,
+                answerValue: "",
+                originalValue: "",
+                filesData: [],
+                newFilesData: [],
+                isNewFile: false
+              });
             })()
           );
         }
-		 else if (dataType === "Multiple Files") {
-  if (!answerId && Array.isArray(filesData) && filesData.length) {
-    createPromises.push(
-      (async () => {
-        const createPayload = {
+
+        return;
+      }
+
+      // 4) Generic create flow for all non-multi-file types
+      if (!answerId) {
+        let createPayload = {
           "lpi_Application@odata.bind": `/lpi_applications(${submissionId})`,
           "lpi_Question@odata.bind": `/lpi_questionframework1s(${questionId})`,
           "lpi_Contact@odata.bind": `/contacts(${contactId})`,
           lpi_questiondatatype: dataType,
-          lpi_answer: answerValue || "",
+          lpi_answer: answerValue || ""
         };
 
-        const res = await fetch("/_api/lpi_userresponses", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            __RequestVerificationToken: token,
-          },
-          body: JSON.stringify(createPayload),
-        });
-
-        if (!res.ok) {
-          throw new Error(await res.text());
+        if (dataType === "Table" && rowNumber !== null && columnName) {
+          createPayload.lpi_rownumber = rowNumber;
+          createPayload.lpi_columnname = columnName;
         }
 
-        const id = res.headers.get("entityid");
+        createPromises.push(
+          fetch("/_api/lpi_userresponses", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              __RequestVerificationToken: token
+            },
+            body: JSON.stringify(createPayload)
+          }).then(async (res) => {
+            if (!res.ok) {
+              throw new Error(await res.text());
+            }
 
-        answersStore.set(questionId, {
-          ...ans,
-          answerId: id,
-          originalValue: answerValue,
-          isNewFile: false,
-        });
+            const id = res.headers.get("entityid");
+            const storeKey =
+              dataType === "Table"
+                ? `${questionId}_${rowNumber}_${columnName}`
+                : questionId;
 
-        for (const file of filesData) {
-          await createFileAnnotation(id, questionId, file);
-        }
-      })()
-    );
-  } else if (answerId && Array.isArray(filesData) && isNewFile) {
-    updatePromises.push(
-      (async () => {
-        try {
-          const updatePayload = {
-            lpi_answer: answerValue || "",
-          };
+            answersStore.set(storeKey, {
+              ...ans,
+              answerId: id,
+              originalValue: answerValue
+            });
 
-          const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+            if (dataType === "File" && fileData) {
+              const annotationId = await createFileAnnotation(id, questionId, fileData);
+              if (annotationId) {
+                fileAnnotationsMap.set(questionId, annotationId);
+              }
+            }
+          })
+        );
+        return;
+      }
+
+      // 5) Single file replace
+      if (dataType === "File" && isNewFile && fileData) {
+        updatePromises.push(
+          (async () => {
+            try {
+              const updatePayload = {
+                lpi_answer: answerValue || ""
+              };
+
+              const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  __RequestVerificationToken: token
+                },
+                body: JSON.stringify(updatePayload)
+              });
+
+              if (!res.ok) {
+                throw new Error(await res.text());
+              }
+
+              const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
+
+              if (currentAnnotations && currentAnnotations.length > 0) {
+                for (const annotation of currentAnnotations) {
+                  await deleteFileAnnotation(annotation.annotationid);
+                }
+              }
+
+              const newAnnotationId = await createFileAnnotation(answerId, questionId, fileData);
+              if (newAnnotationId) {
+                fileAnnotationsMap.set(questionId, newAnnotationId);
+              }
+
+              answersStore.set(questionId, {
+                ...ans,
+                answerId,
+                originalValue: answerValue,
+                isNewFile: false
+              });
+            } catch (error) {
+              console.error(`Error during file replacement for question ${questionId}:`, error);
+              throw error;
+            }
+          })()
+        );
+        return;
+      }
+
+      // 6) Single file delete
+      if (dataType === "File" && !fileData && answerId && originalValue) {
+        updatePromises.push(
+          (async () => {
+            try {
+              const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  __RequestVerificationToken: token
+                },
+                body: JSON.stringify({ lpi_answer: "" })
+              });
+
+              if (!res.ok) {
+                throw new Error(await res.text());
+              }
+
+              const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
+              if (currentAnnotations && currentAnnotations.length > 0) {
+                for (const annotation of currentAnnotations) {
+                  await deleteFileAnnotation(annotation.annotationid);
+                }
+              }
+
+              answersStore.set(questionId, {
+                ...ans,
+                answerId,
+                originalValue: "",
+                isNewFile: false,
+                fileData: null
+              });
+            } catch (error) {
+              console.error(`Error deleting file for question ${questionId}:`, error);
+              throw error;
+            }
+          })()
+        );
+        return;
+      }
+
+      // 7) Normal update for non-file answers / unchanged single file text
+      if (answerValue !== originalValue) {
+        updatePromises.push(
+          fetch(`/_api/lpi_userresponses(${answerId})`, {
             method: "PATCH",
             headers: {
               "Content-Type": "application/json",
-              __RequestVerificationToken: token,
+              __RequestVerificationToken: token
             },
-            body: JSON.stringify(updatePayload),
-          });
-
-          if (!res.ok) {
-            throw new Error(await res.text());
-          }
-
-          const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
-
-          if (currentAnnotations && currentAnnotations.length > 0) {
-            for (const annotation of currentAnnotations) {
-              await deleteFileAnnotation(annotation.annotationid);
-            }
-          }
-
-          for (const file of filesData) {
-            await createFileAnnotation(answerId, questionId, file);
-          }
-
-          answersStore.set(questionId, {
-            ...ans,
-            answerId,
-            originalValue: answerValue,
-            isNewFile: false,
-          });
-        } catch (error) {
-          console.error(`Error saving multiple files for question ${questionId}:`, error);
-          throw error;
-        }
-      })()
-    );
-  } else if (answerId && !Array.isArray(filesData) && originalValue && !answerValue) {
-    updatePromises.push(
-      (async () => {
-        const updatePayload = { lpi_answer: "" };
-
-        const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            __RequestVerificationToken: token,
-          },
-          body: JSON.stringify(updatePayload),
-        });
-
-        if (!res.ok) {
-          throw new Error(await res.text());
-        }
-
-        const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
-        if (currentAnnotations?.length) {
-          for (const annotation of currentAnnotations) {
-            await deleteFileAnnotation(annotation.annotationid);
-          }
-        }
-
-        answersStore.set(questionId, {
-          ...ans,
-          answerId,
-          originalValue: "",
-          isNewFile: false,
-          fileData: null,
-          filesData: [],
-        });
-      })()
-    );
-  }
-        } else if (answerValue !== originalValue) {
-          const updatePayload = {
-            lpi_answer: answerValue || "",
-          };
-
-          if (dataType === "Table" && rowNumber !== null && columnName) {
-            updatePayload.lpi_rownumber = rowNumber;
-            updatePayload.lpi_columnname = columnName;
-          }
-
-          updatePromises.push(
-            fetch(`/_api/lpi_userresponses(${answerId})`, {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-                __RequestVerificationToken: token,
-              },
-              body: JSON.stringify(updatePayload),
-            }).then(async () => {
-              const storeKey =
-                dataType === "Table"
-                  ? `${questionId}_${rowNumber}_${columnName}`
-                  : questionId;
-              answersStore.set(storeKey, {
-                ...ans,
-                answerId: answerId,
-                originalValue: answerValue,
-                isNewFile: false,
-              });
+            body: JSON.stringify({
+              lpi_answer: answerValue || ""
             })
-          );
-        }
-      });
+          }).then(async (res) => {
+            if (!res.ok) {
+              throw new Error(await res.text());
+            }
 
-      await Promise.all([...createPromises, ...updatePromises]);
-      console.log("Answers and files saved successfully");
-    } catch (error) {
-      console.error("Error saving answers:", error);
-      throw error;
-    }
+            const storeKey =
+              dataType === "Table"
+                ? `${questionId}_${rowNumber}_${columnName}`
+                : questionId;
+
+            const current = answersStore.get(storeKey) || ans;
+            answersStore.set(storeKey, {
+              ...current,
+              originalValue: answerValue
+            });
+          })
+        );
+      }
+    });
+
+    await Promise.all(createPromises);
+    await Promise.all(updatePromises);
+  } catch (error) {
+    console.error("Error saving answers:", error);
+    throw error;
   }
+}
+
 
   function getRequestVerificationToken() {
     return new Promise((resolve, reject) => {
