@@ -188,7 +188,7 @@ function updateButtons() {
 
     container.innerHTML += `
       <div class="subsection-card mb-4 p-3 border rounded">
-        <h4 class="mt-3">${subsection}</h4>
+        <h6 class="mt-3"><strong>${subsection}</strong></h6>
         ${questionsHtml}
       </div>`;
   });
@@ -612,7 +612,7 @@ case "Lookup": {
           placeholder="Search..."
           autocomplete="off"
         />
-        <button type="button" class="btn btn-outline-secondary lookup-search-btn" data-questionid="${questionId}">🔍</button>
+        <button type="button" class="btn btn-outline-secondary lookup-search-btn" data-questionid="${questionId}"> 🔎︎ </button>
       </div>
       <ul class="list-group lookup-results mt-2" id="lookup-results-${questionId}" style="max-height:300px; overflow:auto;"></ul>
     </div>
@@ -786,8 +786,8 @@ async function populateTableLookupDropdowns() {
         resultsList.innerHTML = `<li class="list-group-item small text-muted">Searching...</li>`;
 
         const token = await getRequestVerificationToken();
-        const top = 10;
-        let apiUrl = `/api/${entityNameLower}?$select=${encodeURIComponent(selectFields)}&$top=${top}`;
+        const top = 3;
+        let apiUrl = `/_api/${entityNameLower}?$select=${encodeURIComponent(selectFields)}&$top=${top}`;
 
         const trimmed = (term || "").trim();
         if (trimmed && displayFields.length > 0) {
@@ -1042,8 +1042,8 @@ async function populateLookupDropdowns() {
       renderTableRow(q.questionid, columns, i)
     ).join("");
 
-  return 
-    `<div class="table-question">
+    return `
+    <div class="table-question">
       <div class="table-responsive">
         <table class="table table-bordered align-middle">
           <thead><tr>${headerHtml}</tr></thead>
@@ -1058,8 +1058,8 @@ async function populateLookupDropdowns() {
           Remove Row
         </button>
       </div>
-    </div>`
-  ;
+    </div>
+  `;
   }
   function renderTableRow(questionId, columns, rowIndex) {
     return `
@@ -1108,12 +1108,12 @@ async function populateLookupDropdowns() {
         return `<div class="alert alert-warning mb-0"><small>Lookup config missing</small></div>`;
       }
       else{
-      return 
-        `<div class="table-lookup-wrapper">
+      return `
+    <div class="table-lookup-wrapper">
           <div class="input-group">
             <input
               type="text"
-              style="font-size: 14px;"
+              style="font-size: 14px; height: 10px"
               class="form-control table-lookup-search-input"
               data-questionid="${questionId}"
               data-datatype="Table"
@@ -1127,21 +1127,22 @@ async function populateLookupDropdowns() {
             />
             <button
               type="button"
-              class="btn btn-outline-secondary table-lookup-search-btn"
+              class="btn btn-outline-secondary table-lookup-search-btn" 
               data-questionid="${questionId}"
               data-rowindex="${rowIndex}"
               data-columnkey="${col.key || ""}">
-              🔍
+              🔎︎
             </button>
           </div>
           <ul
             class="list-group table-lookup-results mt-1"
+            style="z-index: 9999 !important; font-size: 12px;"
             id="table-lookup-results-${questionId}-${rowIndex}-${col.key}"
-            style="max-height: 220px; overflow:auto;">
+            style="max-height: 100px; overflow:auto;">
           </ul>
         </div>`;
       }
-    }
+      }
       default:
         return `<input style="font-size: 14px;" type="text" ${attrs}>`;
     }
@@ -1244,22 +1245,26 @@ async function populateLookupDropdowns() {
       });
     });
   }
-  // Collect answers from all inputs in the current step
-  async function collectAnswers() {
-    const inputs = container.querySelectorAll(
-      "[data-questionid], [data-group]"
-    );
-    const handledQuestions = new Set();
-    const fileUploadPromises = [];
 
-    inputs.forEach((input) => {
-      const questionId = input.dataset.questionid || input.dataset.group;
-      const dataType = input.dataset.datatype;
-      if (!questionId || handledQuestions.has(questionId)) return;
-      let answerValue = null;
-      // Melky
-      // Handle Lookup type
-      // Handle Lookup type
+	async function collectAnswers() {
+	  const inputs = container.querySelectorAll("[data-questionid], [data-group]");
+	  const handledQuestions = new Set();
+	  const fileUploadPromises = [];
+
+	  inputs.forEach((input) => {
+		const questionId = input.dataset.questionid || input.dataset.group;
+		if (handledQuestions.has(questionId)) return;
+
+		const dataType = input.dataset.datatype;
+		const rowNumber = input.dataset.rowindex || null;
+		const columnName = input.dataset.columnkey || null;
+
+		const storeKey =
+		  dataType === "Table"
+			? `${questionId}_${rowNumber}_${columnName}`
+			: questionId;
+
+		let answerValue = "";
 if (dataType === "Lookup") {
   // the lookup is rendered as an <input> with data-lookup-fields and possibly dataset.display
   const inputEl = input; // the same input element in the inputs NodeList
@@ -1368,89 +1373,134 @@ if (dataType === "Lookup") {
         handledQuestions.add(questionId);
         return;
       }
-      switch (input.type) {
-        case "checkbox": {
-          const checkboxes = container.querySelectorAll(
-            `input[data-group="${questionId}"]:checked`
-          );
-          answerValue = Array.from(checkboxes)
-            .map((cb) => cb.value)
-            .join(",");
-          break;
-        }
-        case "radio": {
-          const selectedRadio = container.querySelector(
-            `input[data-group="${questionId}"]:checked`
-          );
-          answerValue = selectedRadio ? selectedRadio.value : null;
-          break;
-        }
-        case "file": {
-          const fileInput = input;
-          const existingAnswer = answersStore.get(questionId);
+		switch (dataType) {
+		  case "Checkbox": {
+			const checkedBoxes = container.querySelectorAll(
+			  `input[data-group="${questionId}"]:checked`
+			);
+			answerValue = Array.from(checkedBoxes).map((cb) => cb.value).join(",");
+			break;
+		  }
 
-          if (fileInput.files && fileInput.files.length > 0) {
-            const file = fileInput.files[0];
-            fileUploadPromises.push(
-              (async () => {
-                const base64Content = await fileToBase64(file);
-                answersStore.set(questionId, {
-                  questionId,
-                  dataType,
-                  answerId: existingAnswer?.answerId || null,
-                  answerValue: file.name,
-                  originalValue: file.name,
-                  fileData: {
-                    fileName: file.name,
-                    fileSize: file.size,
-                    fileType: file.type,
-                    base64Content: base64Content,
-                  },
-                  isNewFile: true,
-                });
-              })()
-            );
-          } else if (existingAnswer && !existingAnswer.isNewFile) {
-            // No new file selected, but there's an existing file - keep it as is
-            // Don't mark as isNewFile if nothing changed
-          }
-          handledQuestions.add(questionId);
-          return;
-        }
-        default:
-          answerValue = input.value;
-          break;
-      }
+		  case "radio": {
+			const selectedRadio = container.querySelector(
+			  `input[data-group="${questionId}"]:checked`
+			);
+			answerValue = selectedRadio ? selectedRadio.value : null;
+			break;
+		  }
 
-      if (
-        answerValue !== "" &&
-        answerValue !== undefined &&
-        answerValue !== null
-      ) {
-        const existingAnswer = answersStore.get(questionId);
-        if (existingAnswer) {
-          answersStore.set(questionId, {
-            ...existingAnswer,
-            answerValue,
-          });
-        } else {
-          answersStore.set(questionId, {
-            questionId,
-            dataType,
-            answerId: null,
-            answerValue,
-            originalValue: answerValue,
-          });
-        }
-      }
-      handledQuestions.add(questionId);
-    });
+		  case "File": {
+			const fileInput = input;
+			const existingAnswer = answersStore.get(questionId);
 
-    await Promise.all(fileUploadPromises);
-    console.log("Answers collected:", answersStore);
-    console.log("Total answers:", answersStore.size);
-    return answersStore.size;
-  }
+			if (fileInput.files && fileInput.files.length > 0) {
+			  const file = fileInput.files[0];
+
+			  fileUploadPromises.push(
+				(async () => {
+				  const base64Content = await fileToBase64(file);
+				  answersStore.set(questionId, {
+					...(existingAnswer || {}),
+					questionId,
+					dataType,
+					answerId: existingAnswer?.answerId || null,
+					answerValue: file.name,
+					originalValue: file.name,
+					fileData: {
+					  fileName: file.name,
+					  fileSize: file.size,
+					  fileType: file.type,
+					  base64Content
+					},
+					isNewFile: true
+				  });
+				})()
+			  );
+			} else if (existingAnswer && !existingAnswer.isNewFile) {
+			  answersStore.set(questionId, {
+				...existingAnswer,
+				questionId,
+				dataType
+			  });
+			}
+
+			handledQuestions.add(questionId);
+			return;
+		  }
+
+		  case "Multiple Files": {
+			const existingAnswer =
+			  answersStore.get(storeKey) || answersStore.get(questionId) || {};
+
+			answersStore.set(storeKey, {
+			  ...existingAnswer,
+			  questionId,
+			  dataType,
+			  rowNumber,
+			  columnName,
+			  answerId: existingAnswer.answerId || null,
+			  answerValue: existingAnswer.answerValue || "",
+			  originalValue: existingAnswer.originalValue ?? "",
+			  filesData: Array.isArray(existingAnswer.filesData)
+				? existingAnswer.filesData
+				: [],
+			  newFilesData: Array.isArray(existingAnswer.newFilesData)
+				? existingAnswer.newFilesData
+				: [],
+			  isNewFile:
+				Array.isArray(existingAnswer.newFilesData) &&
+				existingAnswer.newFilesData.length > 0
+			});
+
+			handledQuestions.add(questionId);
+			return;
+		  }
+
+		  default:
+			answerValue = input.value;
+			break;
+		}
+
+		if (
+		  answerValue !== "" &&
+		  answerValue !== undefined &&
+		  answerValue !== null
+		) {
+		  const existingAnswer = answersStore.get(storeKey);
+
+		  if (existingAnswer) {
+			answersStore.set(storeKey, {
+			  ...existingAnswer,
+			  questionId,
+			  dataType,
+			  rowNumber,
+			  columnName,
+			  answerValue
+			});
+		  } else {
+			answersStore.set(storeKey, {
+			  questionId,
+			  dataType,
+			  rowNumber,
+			  columnName,
+			  answerId: null,
+			  answerValue,
+			  originalValue: answerValue
+			});
+		  }
+		}
+
+		handledQuestions.add(questionId);
+	  });
+
+	  await Promise.all(fileUploadPromises);
+	  console.log("Answers collected:", answersStore);
+	  console.log("Total answers:", answersStore.size);
+	  return answersStore.size;
+	}
+
+
 // Convert file to Base64
   function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -1484,6 +1534,8 @@ if (dataType === "Lookup") {
     console.log(res);
     return res.headers.get("entityid");
     }
+	
+	
 	async function normalizeFileForAnnotation(file) {
 	  if (!file) return null;
 
@@ -3036,9 +3088,9 @@ function validateUrl(value) {
       if (!currentFile) {
         return;
       }
-      textEl.textContent = `New: ${currentFile.name} (${Math.round(
+      textEl.innerHTML = `New: ${currentFile.name} (${Math.round(
         currentFile.size / 1024
-      )} KB)`;
+      )} KB) <span class="success-badge"><span class="circle-check">✓</span> Uploaded successfully</span>`;
       previewBtn.classList.remove("d-none");
       deleteBtn.classList.remove("d-none");
       openFilePreviewModal(currentFile);
@@ -3133,7 +3185,14 @@ function bindMultipleFilesAttachmentSupport(questionId, scope = document) {
       return;
     }
 
-    textEl.textContent = `${totalFiles} file(s) selected`;
+    textEl.innerHTML = `
+      <span class="success-badge">
+      <span class="circle-check">✓</span>
+            ${totalFiles === 1
+              ? "1 attachment uploaded successfully"
+              : `${totalFiles} attachments uploaded successfully`}
+      </span>
+		`;
     tableWrapper.classList.remove("d-none");
 
     const rows = [];
@@ -3391,144 +3450,153 @@ async function buildAnsPayload() {
       }
 
       // 3) MULTIPLE FILES - handle before generic create branch
-      if (dataType === "Multiple Files") {
-        const existingFiles = Array.isArray(filesData) ? filesData : [];
-        const newFiles = Array.isArray(newFilesData) ? newFilesData : [];
+		if (dataType === "Multiple Files") {
+		  const existingFiles = Array.isArray(filesData) ? filesData : [];
+		  const newFiles = Array.isArray(newFilesData) ? newFilesData : [];
 
-        const finalAnswerValue = [
-          ...existingFiles.map((f) => f.fileName || ""),
-          ...newFiles.map((f) => f.name || f.fileName || "")
-        ]
-          .filter(Boolean)
-          .join(", ");
+		  const finalAnswerValue = [
+			...existingFiles.map((f) => f.fileName || ""),
+			...newFiles.map((f) => f.name || f.fileName || "")
+		  ]
+			.filter(Boolean)
+			.join(", ");
 
-        // New answer + multiple notes
-        if (!answerId && (existingFiles.length > 0 || newFiles.length > 0)) {
-          createPromises.push(
-            (async () => {
-              const createPayload = {
-                "lpi_Application@odata.bind": `/lpi_applications(${submissionId})`,
-                "lpi_Question@odata.bind": `/lpi_questionframework1s(${questionId})`,
-                "lpi_Contact@odata.bind": `/contacts(${contactId})`,
-                lpi_questiondatatype: dataType,
-                lpi_answer: finalAnswerValue
-              };
+		  // New answer + files
+		  if (!answerId && (existingFiles.length > 0 || newFiles.length > 0)) {
+			createPromises.push(
+			  (async () => {
+				const createPayload = {
+				  "lpi_Application@odata.bind": `/lpi_applications(${submissionId})`,
+				  "lpi_Question@odata.bind": `/lpi_questionframework1s(${questionId})`,
+				  "lpi_Contact@odata.bind": `/contacts(${contactId})`,
+				  lpi_questiondatatype: dataType,
+				  lpi_answer: finalAnswerValue
+				};
 
-              const res = await fetch("/_api/lpi_userresponses", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  __RequestVerificationToken: token
-                },
-                body: JSON.stringify(createPayload)
-              });
+				const res = await fetch("/_api/lpi_userresponses", {
+				  method: "POST",
+				  headers: {
+					"Content-Type": "application/json",
+					__RequestVerificationToken: token
+				  },
+				  body: JSON.stringify(createPayload)
+				});
 
-              if (!res.ok) {
-                throw new Error(await res.text());
-              }
+				if (!res.ok) {
+				  throw new Error(await res.text());
+				}
 
-              const id = res.headers.get("entityid");
+				const id = res.headers.get("entityid");
 
-              for (const file of newFiles) {
-                await createFileAnnotation(id, questionId, file);
-              }
+				if (!id) {
+				  throw new Error("User response created but entityid header was missing.");
+				}
 
-              const savedAnnotations = await fetchAnnotationsForUserResponse(id);
+				for (const file of existingFiles) {
+				  await createFileAnnotation(id, questionId, file);
+				}
 
-              answersStore.set(questionId, {
-                ...ans,
-                answerId: id,
-                answerValue: finalAnswerValue,
-                originalValue: finalAnswerValue,
-                filesData: savedAnnotations || [],
-                newFilesData: [],
-                isNewFile: false
-              });
-            })()
-          );
-          return;
-        }
+				for (const file of newFiles) {
+				  await createFileAnnotation(id, questionId, file);
+				}
 
-        // Existing answer + append newly selected files
-        if (answerId && (newFiles.length > 0 || finalAnswerValue !== (originalValue || ""))) {
-          updatePromises.push(
-            (async () => {
-              const updatePayload = {
-                lpi_answer: finalAnswerValue
-              };
+				const savedAnnotations = await fetchAnnotationsForUserResponse(id);
 
-              const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
-                method: "PATCH",
-                headers: {
-                  "Content-Type": "application/json",
-                  __RequestVerificationToken: token
-                },
-                body: JSON.stringify(updatePayload)
-              });
+				answersStore.set(questionId, {
+				  ...ans,
+				  answerId: id,
+				  answerValue: finalAnswerValue,
+				  originalValue: finalAnswerValue,
+				  filesData: savedAnnotations || [],
+				  newFilesData: [],
+				  isNewFile: false
+				});
+			  })()
+			);
+			return;
+		  }
 
-              if (!res.ok) {
-                throw new Error(await res.text());
-              }
+		  // Existing answer + append newly selected files
+		  if (answerId && newFiles.length > 0) {
+			updatePromises.push(
+			  (async () => {
+				const updatePayload = {
+				  lpi_answer: finalAnswerValue
+				};
 
-              for (const file of newFiles) {
-                await createFileAnnotation(answerId, questionId, file);
-              }
+				const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+				  method: "PATCH",
+				  headers: {
+					"Content-Type": "application/json",
+					__RequestVerificationToken: token
+				  },
+				  body: JSON.stringify(updatePayload)
+				});
 
-              const savedAnnotations = await fetchAnnotationsForUserResponse(answerId);
+				if (!res.ok) {
+				  throw new Error(await res.text());
+				}
 
-              answersStore.set(questionId, {
-                ...ans,
-                answerId,
-                answerValue: finalAnswerValue,
-                originalValue: finalAnswerValue,
-                filesData: savedAnnotations || [],
-                newFilesData: [],
-                isNewFile: false
-              });
-            })()
-          );
-          return;
-        }
+				for (const file of newFiles) {
+				  await createFileAnnotation(answerId, questionId, file);
+				}
 
-        // Existing answer + all files removed
-        if (answerId && existingFiles.length === 0 && newFiles.length === 0 && originalValue) {
-          updatePromises.push(
-            (async () => {
-              const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
-                method: "PATCH",
-                headers: {
-                  "Content-Type": "application/json",
-                  __RequestVerificationToken: token
-                },
-                body: JSON.stringify({ lpi_answer: "" })
-              });
+				const savedAnnotations = await fetchAnnotationsForUserResponse(answerId);
 
-              if (!res.ok) {
-                throw new Error(await res.text());
-              }
+				answersStore.set(questionId, {
+				  ...ans,
+				  answerId,
+				  answerValue: finalAnswerValue,
+				  originalValue: finalAnswerValue,
+				  filesData: savedAnnotations || [],
+				  newFilesData: [],
+				  isNewFile: false
+				});
+			  })()
+			);
+			return;
+		  }
 
-              const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
-              if (currentAnnotations?.length) {
-                for (const annotation of currentAnnotations) {
-                  await deleteFileAnnotation(annotation.annotationid);
-                }
-              }
+		  // Existing answer + all files removed
+		  if (answerId && existingFiles.length === 0 && newFiles.length === 0 && originalValue) {
+			updatePromises.push(
+			  (async () => {
+				const res = await fetch(`/_api/lpi_userresponses(${answerId})`, {
+				  method: "PATCH",
+				  headers: {
+					"Content-Type": "application/json",
+					__RequestVerificationToken: token
+				  },
+				  body: JSON.stringify({ lpi_answer: "" })
+				});
 
-              answersStore.set(questionId, {
-                ...ans,
-                answerId,
-                answerValue: "",
-                originalValue: "",
-                filesData: [],
-                newFilesData: [],
-                isNewFile: false
-              });
-            })()
-          );
-        }
+				if (!res.ok) {
+				  throw new Error(await res.text());
+				}
 
-        return;
-      }
+				const currentAnnotations = await fetchAnnotationsForUserResponse(answerId);
+				if (currentAnnotations?.length) {
+				  for (const annotation of currentAnnotations) {
+					await deleteFileAnnotation(annotation.annotationid);
+				  }
+				}
+
+				answersStore.set(questionId, {
+				  ...ans,
+				  answerId,
+				  answerValue: "",
+				  originalValue: "",
+				  filesData: [],
+				  newFilesData: [],
+				  isNewFile: false
+				});
+			  })()
+			);
+		  }
+
+		  return;
+		}
+
 
       // 4) Generic create flow for all non-multi-file types
       if (!answerId) {
