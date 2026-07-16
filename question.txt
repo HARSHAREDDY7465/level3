@@ -205,6 +205,7 @@ function updateButtons() {
   populateTableLookupDropdowns();
   attachCheckboxListeners();
   restoreAnswers();
+  initFlatpickrDates(container);
 
   const textInputs = container.querySelectorAll(
     'input[data-datatype="Text"], textarea[data-datatype="TextArea"]'
@@ -510,7 +511,7 @@ function updateButtons() {
       case "URL":
         return `<input type="url" class="form-control" data-questionid="${questionId}" placeholder="https://example.com" data-datatype="${dataType}" />`;
       case "Date":
-        return `<input type="date" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}" />`;
+        return ` <input type="text" class="form-control flatpickr-date" data-questionid="${questionId}" data-datatype="${dataType}" placeholder="Select date" autocomplete="off" />`;
       case "Time":
         return `<input type="time" class="form-control" data-questionid="${questionId}" data-datatype="${dataType}" />`;
       case "Datetime":
@@ -786,7 +787,7 @@ async function populateTableLookupDropdowns() {
         resultsList.innerHTML = `<li class="list-group-item small text-muted">Searching...</li>`;
 
         const token = await getRequestVerificationToken();
-        const top = 3;
+        const top = 5;
         let apiUrl = `/_api/${entityNameLower}?$select=${encodeURIComponent(selectFields)}&$top=${top}`;
 
         const trimmed = (term || "").trim();
@@ -838,7 +839,7 @@ async function populateTableLookupDropdowns() {
     });
 
     input.dataset.lookupBound = "true";
-    performSearch("");
+    // performSearch("");
   }
 }
   // Melky Code : Lookup Dropdown
@@ -1070,6 +1071,32 @@ async function populateLookupDropdowns() {
     </tr>
   `;
   }
+  function initFlatpickrDates(scope = document) {
+  const dateInputs = scope.querySelectorAll(".flatpickr-date");
+
+  dateInputs.forEach((input) => {
+    if (input._flatpickr) return;
+
+    flatpickr(input, {
+      dateFormat: "m/d/Y",
+      altInput: true,
+      altFormat: "m/d/Y",
+      allowInput: true,
+      monthSelectorType: "dropdown",
+      disableMobile: true,
+      static: true,
+      clickOpens: document.body.dataset.mode !== "read",
+      onReady: function (selectedDates, dateStr, instance) {
+        if (instance.altInput) {
+          instance.altInput.classList.add("form-control");
+          if (document.body.dataset.mode === "read") {
+            instance.altInput.disabled = true;
+          }
+        }
+      }
+    });
+  });
+}
   function renderTableCell(questionId, rowIndex, col, childId = "") {
     const attrs = `class="form-control"
     data-questionid="${questionId}"
@@ -1079,7 +1106,19 @@ async function populateLookupDropdowns() {
      data-childid="${childId}"`;
     switch (col.type) {
       case "Date":
-        return `<input style="font-size: 14px;" type="date"  ${attrs}>`;
+        return `<input
+      type="text"
+      style="font-size: 14px;"
+      class="form-control flatpickr-date"
+      data-questionid="${questionId}"
+      data-datatype="Table"
+      data-rowindex="${rowIndex}"
+      data-columnkey="${col.key || ""}"
+      data-childid="${childId}"
+      placeholder="Select date"
+      autocomplete="off"
+    />
+  `;
       case "Number":
         return `<input style="font-size: 14px;" type="number" ${attrs}>`;
       case "Decimal":
@@ -1199,6 +1238,7 @@ async function populateLookupDropdowns() {
 
       populateTableLookupDropdowns();
       restoreAnswers();
+	  initFlatpickrDates(tbody);
     }
   });
   // table functionality
